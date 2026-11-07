@@ -282,3 +282,23 @@ func SaveWorldInfo(lastWorldTime int32) error {
 	_, err := execStatus("dbo.usp_Save_WorldInfo_E", sql.Named("LastWorldTime", lastWorldTime))
 	return err
 }
+
+// ReadWorldInfo is usp_Read_WorldInfo_E: the packed world calendar base
+// (0 without a row).
+func ReadWorldInfo() (int32, error) {
+	pool, err := Pool(GameData)
+	if err != nil {
+		return 0, err
+	}
+	c, cancel := ctx()
+	defer cancel()
+	var v sql.NullInt64
+	err = pool.QueryRowContext(c, "dbo.usp_Read_WorldInfo_E").Scan(&v)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("usp_Read_WorldInfo_E: %w", err)
+	}
+	return int32(v.Int64), nil
+}

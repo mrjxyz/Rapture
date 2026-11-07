@@ -57,17 +57,9 @@ func buildRenameResult(ok bool) []byte {
 	return w.MustFinish()
 }
 
-// shaiyaTime encodes 2020-01-01 12:30:00 in the client's packed format.
-func shaiyaTime() int32 {
-	year, month, day, hour, minute, second := int32(2020), int32(1), int32(1), int32(12), int32(30), int32(0)
-	n1 := 16 * (year - 16)
-	n2 := 32 * (month + n1)
-	return second + ((minute + ((hour + 32*(day+n2)) << 6)) << 6)
-}
-
 func buildWorldDay() []byte {
 	w := packet.New(packet.WorldDay)
-	w.I32(shaiyaTime())
+	w.U32(worldDay()) // CWorld::GetWorldDay
 	return w.MustFinish()
 }
 

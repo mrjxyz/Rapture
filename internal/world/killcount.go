@@ -42,8 +42,8 @@ import (
 //     that percent (ExpDrop). Types 26 and 27 have no reader in EP4.5.
 //
 // Below the first tier no type applies (the original reads the slot
-// before the table there). Obelisk kills (CMap::ObeliskDestroy) are not
-// modeled: Rapture has no obelisks.
+// before the table there). CMap::ObeliskDestroy adds the per-country
+// amount at 0x005471c0, which nothing writes (0) in EP4.5.
 
 const (
 	kcTypes          = 28
@@ -237,18 +237,23 @@ func TickKillCount(now time.Time, log logPrinter) {
 	}
 }
 
-// kcSave stores both counts; without a WorldInfo row (the world calendar,
-// not ported, creates it in the original) it creates the row first.
+// kcSave stores both counts; without a WorldInfo row (the world calendar
+// creates it at start) it creates the row first.
 func kcSave(light, dark uint32, log logPrinter) {
+	if err := kcStore(light, dark); err != nil {
+		log.Printf("Rapture World kill count save failed: %v", err)
+	}
+}
+
+// kcStore is the storage step (tests replace it).
+var kcStore = func(light, dark uint32) error {
 	err := db.SaveGodBless(light, dark)
 	if errors.Is(err, db.ErrNoWorldInfo) {
-		if err = db.SaveWorldInfo(shaiyaTime()); err == nil {
+		if err = db.SaveWorldInfo(worldBasePacked()); err == nil {
 			err = db.SaveGodBless(light, dark)
 		}
 	}
-	if err != nil {
-		log.Printf("Rapture World kill count save failed: %v", err)
-	}
+	return err
 }
 
 // kcAnnounce is CWorldThread::SendAllKillCount: 0x020F to the country.

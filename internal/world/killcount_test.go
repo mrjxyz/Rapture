@@ -15,6 +15,8 @@ func (nopLog) Printf(string, ...any) {}
 
 // withTiers installs a two-tier table per country for a test.
 func withTiers(t *testing.T) {
+	oldStore := kcStore
+	kcStore = func(uint32, uint32) error { return nil }
 	kcMu.Lock()
 	oldTiers, oldWorld := kcTiers, kcWorld
 	var a, b kcTier
@@ -29,6 +31,7 @@ func withTiers(t *testing.T) {
 	setKillCountLocked(1, 0, now)
 	kcMu.Unlock()
 	t.Cleanup(func() {
+		kcStore = oldStore
 		kcMu.Lock()
 		kcTiers, kcWorld = oldTiers, oldWorld
 		kcMu.Unlock()
