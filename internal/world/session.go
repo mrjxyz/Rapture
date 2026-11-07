@@ -62,6 +62,7 @@ type Session struct {
 
 	autoAttack       bool
 	autoAttackTarget uint32
+	autoAttackUser   bool // the target is a user (0x0502), else a mob
 	lastAutoAttackAt time.Time
 
 	positionDirty    bool
@@ -246,6 +247,12 @@ func (s *Session) tick(idle bool) {
 	s.processBuffs()
 	s.tickSkillOnce()
 	s.tickFriendly()
+	s.tickUserHits()
+	if s.player != nil {
+		for n := s.player.TakeWeaponWear(); n > 0; n-- {
+			s.wearWeapon()
+		}
+	}
 	s.tickReturnToTown()
 	s.takeGuildFee()
 	s.tickRebirth(time.Now())
@@ -259,8 +266,14 @@ func (s *Session) tick(idle bool) {
 		s.syncQuestIDs()
 	}
 	s.processPendingCast()
-	if idle && s.autoAttack && !s.autoAttackSwing(s.autoAttackTarget) {
-		s.autoAttack = false
+	if idle && s.autoAttack {
+		swing := s.autoAttackSwing
+		if s.autoAttackUser {
+			swing = s.userAttackSwing
+		}
+		if !swing(s.autoAttackTarget) {
+			s.autoAttack = false
+		}
 	}
 }
 
@@ -324,7 +337,7 @@ func (s *Session) inCombat() bool {
 // deadGated lists the inputs ignored while dead (revive is 0x0553).
 func deadGated(op packet.Opcode) bool {
 	switch op {
-	case packet.CharacterMove, packet.CharacterMobAutoAttack, packet.SkillUse, packet.SkillUseNoTarget,
+	case packet.CharacterMove, packet.CharacterMobAutoAttack, packet.CharacterUserAutoAttack, packet.SkillUse, packet.SkillUseNoTarget,
 		packet.UseItem, packet.ChangeAppearance, packet.UseVehicle:
 		return true
 	}
@@ -587,9 +600,21 @@ func (s *Session) dispatch(op packet.Opcode, p []byte) {
 		s.cancelMove()
 		if len(p) >= 6 && s.char != nil {
 			id, _ := packet.U32(p[2:])
-			s.autoAttack, s.autoAttackTarget = true, id
+			s.autoAttack, s.autoAttackTarget, s.autoAttackUser = true, id, false
 			if !s.autoAttackSwing(id) {
 				s.autoAttack = false
+			}
+		}
+	case packet.CharacterUserAutoAttack:
+		// PacketPC 0x0502: only a hostile user starts the attack.
+		s.cancelMove()
+		if len(p) >= 6 && s.char != nil {
+			id, _ := packet.U32(p[2:])
+			if s.hostileUser(id) != nil {
+				s.autoAttack, s.autoAttackTarget, s.autoAttackUser = true, id, true
+				if !s.userAttackSwing(id) {
+					s.autoAttack = false
+				}
 			}
 		}
 	case packet.SkillUse, packet.SkillUseNoTarget:

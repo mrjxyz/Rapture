@@ -283,7 +283,7 @@ func (s *Session) deathExpLoss() int {
 // the category (its AbilityValue for that category is non-zero):
 // SuccessType 1 rolls SuccessValue%, 2 rolls LUC x 10 / SuccessValue and
 // 3 WIS x 10 / SuccessValue (CUser +0x1234 / +0x122c). A mob resisting the
-// melee mirror skill cannot be reflected.
+// melee mirror skill cannot be reflected; md is nil for a user attacker.
 func (s *Session) reflects(kind int, md *db.MobDef) bool {
 	var mirror, melee *db.SkillDef
 	for _, b := range s.buffs {
@@ -321,7 +321,7 @@ func (s *Session) reflects(kind int, md *db.MobDef) bool {
 	if !reflected {
 		return false
 	}
-	if melee != nil {
+	if melee != nil && md != nil {
 		for _, id := range md.ResistSkill {
 			if id == melee.SkillID {
 				return false

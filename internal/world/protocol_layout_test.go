@@ -49,6 +49,7 @@ func TestPacketLayoutsMatchClient(t *testing.T) {
 		{"0x0406 u32", buildCharacterReviveInit(1), 4},
 		{"0x0501 0058f4f0", buildCharacterMove(ch, 0, 0), 19},
 		{"0x0503 0058f6d0", buildCharacterMobAttack(1, 1, 0, 1), 15},
+		{"0x0502 0058f640", buildCharacterUserAttack(1, 1, 0, 1), 15},
 		{"0x0504 0058f760", buildCharacterDeath(1, 2, 1), 9},
 		{"0x0505 0058f7c0", buildCharacterReviveHitpoints(1, 1, 1, 1), 16},
 		{"0x0506 0058f830", buildCharacterMotion(1, 1), 5},

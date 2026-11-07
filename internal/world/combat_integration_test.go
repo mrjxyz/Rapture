@@ -834,3 +834,94 @@ func TestFriendlySkills(t *testing.T) {
 		t.Fatal("buff not cancelled")
 	}
 }
+
+// TestUserAttack follows PacketPC 0x0502 / UpdateAttack / CUser::AttackUser
+// 0x00456870: only a user of the other country is a target, the swing is
+// resolved in the target's session, and a kill is a type-1 death.
+func TestUserAttack(t *testing.T) {
+	if _, err := os.Stat("data/game"); err != nil {
+		os.Chdir("../..")
+	}
+	config.LoadRuntimeEnv()
+	if err := db.Open(db.UserData, db.GameData, db.GameDefs); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ReloadDefsForTest(); err != nil {
+		t.Fatal(err)
+	}
+	logger, err := logx.New("rapture_world_test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const mapID = 60051
+	session := func(id uint32, faction uint8, x float32) *Session {
+		a, b := net.Pipe()
+		go io.Copy(io.Discard, b)
+		ch := &db.Character{ID: id, Level: 40, Mode: growNormal, Str: 80, Dex: 50, Rec: 50, Int: 20, Wis: 20, Luc: 50,
+			MapID: mapID, PosX: x, PosY: 11, PosZ: 500}
+		ch.MaxHP, ch.MaxMP, ch.MaxSP = basePools(ch)
+		ch.CurrentHP, ch.CurrentMP, ch.CurrentSP = ch.MaxHP, ch.MaxMP, ch.MaxSP
+		s := &Session{char: ch, log: logger.Tagged("unit"), logger: logger, faction: faction,
+			skillCooldowns: map[uint16]time.Time{}, out: &connWriter{conn: a}}
+		s.player = RegisterPlayer(*ch, nil, false, faction, s.out, logger)
+		s.player.SetAlive(true)
+		t.Cleanup(s.player.Unregister)
+		return s
+	}
+	attacker := session(900201, FactionLight, 500)
+	ally := session(900202, FactionLight, 501)
+	enemy := session(900203, FactionDark, 501)
+	// A one-handed sword (Type 1) so the swing has a weapon.
+	var weapon *db.Item
+	for typeID := uint8(1); typeID < 60 && weapon == nil; typeID++ {
+		if d := db.MustDefs().Item(1, typeID); d != nil && d.AttackTime > 0 {
+			weapon = &db.Item{Bag: 0, Slot: weaponSlot, Type: 1, TypeID: typeID, Quality: d.Quality, Count: 1}
+		}
+	}
+	if weapon == nil {
+		t.Skip("no type-1 weapon in Items")
+	}
+	attacker.items = []db.Item{*weapon}
+
+	if attacker.hostileUser(ally.char.ID) != nil {
+		t.Fatal("a user of the same country is attackable")
+	}
+	if attacker.hostileUser(enemy.char.ID) == nil {
+		t.Fatal("a user of the other country is not attackable")
+	}
+	if !attacker.userAttackSwing(enemy.char.ID) {
+		t.Fatal("swing cancelled in range")
+	}
+	if n := len(enemy.player.userHits); n != 1 {
+		t.Fatalf("queued %d hits, want 1", n)
+	}
+	attacker.lastAutoAttackAt = time.Time{}
+	if attacker.userAttackSwing(ally.char.ID) {
+		t.Fatal("swing on an ally kept the attack")
+	}
+	enemy.player.TakeUserHits()
+
+	// Resolve many swings: some hit, the HP drops, and a crit asks the
+	// attacker's session to wear the weapon.
+	stats := attacker.stats()
+	hits, crits := 0, 0
+	for i := 0; i < 200 && !enemy.dead; i++ {
+		before := enemy.char.CurrentHP
+		enemy.player.QueueUserHit(pendingUserHit{AttackerID: attacker.char.ID, Stats: stats, Kind: attackMelee, X: 500, Z: 500})
+		enemy.tickUserHits()
+		if enemy.char.CurrentHP < before {
+			hits++
+		}
+		crits += attacker.player.TakeWeaponWear()
+	}
+	if hits == 0 {
+		t.Fatal("200 swings never hit")
+	}
+	if !enemy.dead || enemy.player.IsAlive() || enemy.char.CurrentHP != 0 {
+		t.Fatalf("enemy not killed: dead=%v hp=%d", enemy.dead, enemy.char.CurrentHP)
+	}
+	t.Logf("hits=%d crits=%d", hits, crits)
+	if attacker.hostileUser(enemy.char.ID) != nil {
+		t.Fatal("a dead user is attackable")
+	}
+}

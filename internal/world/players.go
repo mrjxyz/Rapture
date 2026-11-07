@@ -67,6 +67,8 @@ type ConnectedPlayer struct {
 	damage       []pendingDamage
 	lifeSkill    *pendingLifeSkill
 	friendly     []pendingFriendly
+	userHits     []pendingUserHit
+	weaponWear   int
 
 	guild    playerGuildState // guarded by guildMu
 	soulKill bool
