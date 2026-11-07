@@ -71,6 +71,15 @@ func (s *Session) applyTeleport(mapID uint16, x, y, z float32, label string) {
 		}
 		mapID = zone
 	}
+	// GetZoneByMapID's party case: the party's own instance.
+	if !isInstanceZone(mapID) && mapCreateType(mapID) == partyCreateType {
+		zone, ok := s.enterPartyInstance(mapID)
+		if !ok {
+			s.log.Printf("Rapture World party map %d refused (no party)", mapID)
+			return
+		}
+		mapID = zone
+	}
 	// LeaveUser / EnterUser: the old view goes (on the same map the client
 	// keeps its entities, so they get leave packets), then the new one.
 	if mapID != ch.MapID && s.player != nil {
@@ -111,7 +120,8 @@ func (s *Session) handleCharacterMove(p []byte) {
 		s.player.UpdateMotion(motion, direction)
 	}
 	s.duelCheckMove()
-	if portal, ok := s.usablePortal(x, y, z, nil); ok {
+	// A gated map (0x020A refusals) is left to the explicit portal request.
+	if portal, ok := s.usablePortal(x, y, z, nil); ok && s.portalGate(portal.TargetMapID) == 0 {
 		s.applyTeleport(portal.TargetMapID, portal.TargetX, portal.TargetY, portal.TargetZ, "portal teleport")
 		return
 	}
@@ -131,6 +141,10 @@ func (s *Session) handleEnteredPortal(index uint8) {
 		return
 	}
 	if portal, ok := s.usablePortal(s.char.PosX, s.char.PosY, s.char.PosZ, &index); ok {
+		if r := s.portalGate(portal.TargetMapID); r != 0 {
+			s.send(buildPortalResult(index, r), "0x020A portal refused")
+			return
+		}
 		s.applyTeleport(portal.TargetMapID, portal.TargetX, portal.TargetY, portal.TargetZ, "explicit portal teleport")
 	}
 }

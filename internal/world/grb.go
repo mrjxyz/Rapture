@@ -36,6 +36,9 @@ const (
 // grbNow is the clock the battle entry checks (tests replace it).
 var grbNow = time.Now
 
+// grbSlots is the two CreateTime entries IsGuildRankMapOpenTime reads.
+func grbSlots(z ZoneConfig) []grbSlot { return z.Schedule[:min(len(z.Schedule), 2)] }
+
 // grbSlot is one Map.ini CreateTime entry.
 type grbSlot struct{ Day, Hour, Hours int }
 
@@ -129,7 +132,7 @@ func (s *Session) enterGuildRanking(mapID uint16) (uint16, bool) {
 	g := s.player.guild.guild
 	guildMu.Unlock()
 	cfg := mapConfig.Zones[mapID]
-	if g == nil || !grbOpen(cfg.Schedule, grbNow()) {
+	if g == nil || !grbOpen(grbSlots(cfg), grbNow()) {
 		return 0, false
 	}
 	grbState.Lock()
@@ -203,9 +206,9 @@ func TickGuildRanking(now time.Time, log *logx.Logger) {
 	grbState.Unlock()
 	for _, mapID := range grbMaps() {
 		cfg := mapConfig.Zones[mapID]
-		open := grbOpen(cfg.Schedule, now)
+		open := grbOpen(grbSlots(cfg), now)
 		if newMinute {
-			if t, ok := grbNotice(cfg.Schedule, now); ok {
+			if t, ok := grbNotice(grbSlots(cfg), now); ok {
 				w := packet.New(packet.GuildRankingNotice)
 				w.U16(mapID)
 				w.U8(t)

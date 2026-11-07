@@ -10,6 +10,7 @@ import (
 
 	"github.com/Spelunkern/Rapture/internal/config"
 	"github.com/Spelunkern/Rapture/internal/logx"
+	"time"
 )
 
 // The original PS_Game configuration (data/game/, copied from the EP4.5
@@ -94,8 +95,14 @@ type ZoneConfig struct {
 	Rebirth, RebirthLight, RebirthFury *MapPos
 	WarType                            string
 	CreateType                         string // instanced maps (R, H, P)
-	// CreateTime (day of week, start hour, hours) entries; CMap reads two.
+	// CreateTime (day of week, start hour, hours) entries, up to 7 as
+	// CMap::LoadConfig stores them (the ranking battle reads two).
 	Schedule []grbSlot
+	// CreateMinUser (party members to enter a P map), EnterMaxUser (an
+	// instance's capacity, 30 by default) and ExpireTime (minutes; an empty
+	// instance goes ExpireTime x 60 s + 30 s after it first empties).
+	CreateMinUser, EnterMaxUser int
+	Expire                      time.Duration
 }
 
 // MapConfig is the parsed Map.ini.
@@ -143,8 +150,15 @@ func loadMapIni(log *logx.Logger) error {
 		}
 		z := ZoneConfig{Dungeon: strings.EqualFold(get(sec, "MAPTYPE"), "D"), WarType: get(sec, "WARTYPE"),
 			CreateType: get(sec, "CREATETYPE")}
+		z.CreateMinUser, _ = strconv.Atoi(strings.TrimSpace(get(sec, "CREATEMINUSER")))
+		z.EnterMaxUser = 30
+		if v, err := strconv.Atoi(strings.TrimSpace(get(sec, "ENTERMAXUSER"))); err == nil {
+			z.EnterMaxUser = v
+		}
+		expire, _ := strconv.Atoi(strings.TrimSpace(get(sec, "EXPIRETIME")))
+		z.Expire = time.Duration(expire)*time.Minute + 30*time.Second
 		if n := numbers(get(sec, "CREATETIME")); len(n) >= 3 {
-			for i := 0; i+2 < len(n) && len(z.Schedule) < 2; i += 3 {
+			for i := 0; i+2 < len(n) && len(z.Schedule) < 7; i += 3 {
 				z.Schedule = append(z.Schedule, grbSlot{Day: int(n[i]), Hour: int(n[i+1]), Hours: int(n[i+2])})
 			}
 		}

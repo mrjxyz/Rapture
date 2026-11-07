@@ -81,6 +81,7 @@ func TestPacketLayoutsMatchClient(t *testing.T) {
 		{"0x2503 00596020", duelPacket(0x2503, func(w *packet.Writer) { w.F32(1); w.F32(2); w.U32(3) }), 12},
 		{"0x2505 u8", duelByte(0x2505, 1), 1},
 		{"0x2506 005960b0", duelPacket(0x2506, func(w *packet.Writer) { w.U8(1); w.U32(1) }), 5},
+		{"0x020a 00597a30", buildPortalResult(1, 9), 2},
 		{"0x0512 slot_150", buildDrainPacket(opUserSkillDrain, 0, 1, 1, 1, 1, [3]uint16{}, [3]uint16{}), 24},
 		{"0x0513 00590120", buildSkillUseResult(opUserSkillOther, 0, 1, 1, 1, 1, 1, 1, 1), 18},
 		{"0x0514 005901e0", buildUserSkillExtra(1, 1, 1, 1, [3]uint32{}), 17},

@@ -1480,3 +1480,74 @@ func TestGemSkills(t *testing.T) {
 		}
 	}
 }
+
+// TestPartyDungeon follows the 0x020A gates for a P map and
+// GetZoneByMapID's party instance, then the empty-instance expiry.
+func TestPartyDungeon(t *testing.T) {
+	if _, err := os.Stat("data/game"); err != nil {
+		os.Chdir("../..")
+	}
+	config.LoadRuntimeEnv()
+	if err := db.Open(db.UserData, db.GameData, db.GameDefs); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ReloadDefsForTest(); err != nil {
+		t.Fatal(err)
+	}
+	logger, err := logx.New("rapture_world_test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := LoadGameConfig(logger); err != nil {
+		t.Fatal(err)
+	}
+	const dungeon = 64
+	z, ok := mapConfig.Zones[dungeon]
+	if !ok || z.CreateType != partyCreateType || z.CreateMinUser != 18 || z.EnterMaxUser != 30 || z.Expire != 2*time.Minute+30*time.Second {
+		t.Fatalf("map 64 config %+v", z)
+	}
+	a, b := net.Pipe()
+	go io.Copy(io.Discard, b)
+	ch := &db.Character{ID: 900701, Level: 60, MapID: 1, PosX: 500, PosZ: 500}
+	ch.MaxHP, ch.MaxMP, ch.MaxSP = basePools(ch)
+	ch.CurrentHP = ch.MaxHP
+	s := &Session{char: ch, log: logger.Tagged("unit"), logger: logger, skillCooldowns: map[uint16]time.Time{}, out: &connWriter{conn: a}}
+	s.player = RegisterPlayer(*ch, nil, false, FactionLight, s.out, logger)
+	t.Cleanup(s.player.Unregister)
+	old := grbNow
+	defer func() { grbNow = old }()
+	// Monday 21:30 is inside (1, 21, 1); Sunday is not in the schedule.
+	grbNow = func() time.Time { return time.Date(2026, 11, 9, 21, 30, 0, 0, time.Local) }
+	if r := s.portalGate(dungeon); r != portalNoParty {
+		t.Fatalf("no party: %d", r)
+	}
+	pt := &party{id: 990990, members: []*ConnectedPlayer{s.player}}
+	partyMu.Lock()
+	s.player.party = pt
+	partyMu.Unlock()
+	defer func() { partyMu.Lock(); s.player.party = nil; partyMu.Unlock() }()
+	if r := s.portalGate(dungeon); r != portalPartySmall {
+		t.Fatalf("small party: %d", r)
+	}
+	grbNow = func() time.Time { return time.Date(2026, 11, 8, 21, 30, 0, 0, time.Local) }
+	if r := s.portalGate(dungeon); r != portalClosed {
+		t.Fatalf("closed: %d", r)
+	}
+	zone, ok := s.enterPartyInstance(dungeon)
+	if !ok || realMap(zone) != dungeon {
+		t.Fatalf("instance %d %v", zone, ok)
+	}
+	if again, _ := s.enterPartyInstance(dungeon); again != zone {
+		t.Fatalf("second entry got zone %d, want %d", again, zone)
+	}
+	now := time.Now()
+	TickInstances(now, testLog{t})
+	TickInstances(now.Add(z.Expire-time.Second), testLog{t})
+	if _, ok := findInstance(dungeon, pt.id); !ok {
+		t.Fatal("instance expired early")
+	}
+	TickInstances(now.Add(z.Expire), testLog{t})
+	if _, ok := findInstance(dungeon, pt.id); ok {
+		t.Fatal("empty instance did not expire")
+	}
+}
