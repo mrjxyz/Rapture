@@ -62,3 +62,54 @@ func TestUserHitChanceClamp(t *testing.T) {
 		t.Fatalf("strong attacker hit %d/20000, want about 99%%", hits)
 	}
 }
+
+// CUser::GetExp 0x004581b0: dead level x 50 x ((dead - killer + 1) x 0.2
+// + 1), at least 1, 0 when the dead user is 10+ levels above.
+func TestPvPExp(t *testing.T) {
+	cases := []struct {
+		dead, killer uint16
+		want         uint32
+	}{
+		{40, 40, 2400}, // 2000 x 1.2
+		{49, 40, 7350}, // diff 9: 2450 x 3
+		{50, 40, 0},    // diff 10
+		{20, 40, 1},    // a negative factor floors at 1
+		{30, 35, 600},  // 1500 x 0.2
+	}
+	for _, c := range cases {
+		got := pvpExp(c.dead, c.killer)
+		diff := float64(int32(c.dead) - int32(c.killer))
+		want := uint32(max(int64(float64(c.dead)*50*((diff+1)*0.2+1)), 1))
+		if diff > 9 {
+			want = 0
+		}
+		if got != want {
+			t.Fatalf("pvpExp(%d, %d) = %d, want %d", c.dead, c.killer, got, want)
+		}
+	}
+}
+
+func TestPvPDropChance(t *testing.T) {
+	for vg, want := range map[int16]int{0: 100, 10: 100, 11: 95, -51: 90, 200: 65, -191: 65, 171: 70, 141: 80, 101: 85} {
+		if got := pvpDropChance(vg); got != want {
+			t.Fatalf("Vg %d: %d%%, want %d%%", vg, got, want)
+		}
+	}
+}
+
+// CDamage::GetMax keeps the first entry on a tie.
+func TestDamageLedgerTop(t *testing.T) {
+	s := &Session{}
+	s.addDamage(damageByMob, 7, 50)
+	s.addDamage(damageByUser, 1, 30)
+	s.addDamage(damageByUser, 1, 20)
+	s.addDamage(damageByUser, 2, 10)
+	top, ok := s.topDamage()
+	if !ok || top.Type != damageByMob || top.ID != 7 {
+		t.Fatalf("top %+v, want the mob (first of the 50s)", top)
+	}
+	s.addDamage(damageByUser, 2, 41)
+	if top, _ = s.topDamage(); top.Type != damageByUser || top.ID != 2 || top.Amount != 51 {
+		t.Fatalf("top %+v, want user 2 with 51", top)
+	}
+}

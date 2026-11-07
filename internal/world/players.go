@@ -68,6 +68,8 @@ type ConnectedPlayer struct {
 	lifeSkill    *pendingLifeSkill
 	friendly     []pendingFriendly
 	userHits     []pendingUserHit
+	pvpKills     []pvpKill
+	itemGrants   []db.Item
 	weaponWear   int
 
 	guild    playerGuildState // guarded by guildMu

@@ -331,12 +331,10 @@ func (s *Session) takeMobDamage(d pendingDamage, damage uint32, stats *Character
 	}
 	s.wearArmour()
 	s.cancelMove() // CMob::Attack -> StatusCastingStop -> CancleMove
+	s.addDamage(damageByMob, d.MobGlobalID, damage)
 	newEffective := satSub(cur.CurrentHP, damage)
 	ch.CurrentHP = satSub(ch.CurrentHP, cur.CurrentHP-newEffective)
 	killed := newEffective == 0
-	if killed {
-		ch.Deaths++
-	}
 	s.persist()
 	s.dismount()
 	if !killed {
@@ -352,6 +350,7 @@ func (s *Session) afterMobDamage(d pendingDamage, killed bool) {
 	if !killed {
 		return
 	}
+	s.damageLedger = nil // CDamage::Reset; deaths only count by users (KillPCFrom)
 	state, death := buildCharacterDeathState(ch.ID), buildCharacterDeath(ch.ID, deathTypeMob, d.MobGlobalID)
 	for _, p := range PlayersNear(ch.MapID, ch.PosX, ch.PosZ, CombatRadius) {
 		p.Send(state, "0x051C character death state")

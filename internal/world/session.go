@@ -62,7 +62,8 @@ type Session struct {
 
 	autoAttack       bool
 	autoAttackTarget uint32
-	autoAttackUser   bool // the target is a user (0x0502), else a mob
+	autoAttackUser   bool          // the target is a user (0x0502), else a mob
+	damageLedger     []damageEntry // CDamage: HP damage taken per attacker since the last death
 	lastAutoAttackAt time.Time
 
 	positionDirty    bool
@@ -248,6 +249,7 @@ func (s *Session) tick(idle bool) {
 	s.tickSkillOnce()
 	s.tickFriendly()
 	s.tickUserHits()
+	s.tickPvP()
 	if s.player != nil {
 		for n := s.player.TakeWeaponWear(); n > 0; n-- {
 			s.wearWeapon()

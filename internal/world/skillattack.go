@@ -132,7 +132,7 @@ func (s *Session) sacrifice() {
 		return
 	}
 	ch.CurrentHP = 0
-	ch.Deaths++
+	s.damageLedger = nil // CDamage::Reset
 	s.persist()
 	refreshed := s.stats()
 	s.send(buildCurrentHitpoints(&refreshed), "0x0521 current hp after sacrifice")

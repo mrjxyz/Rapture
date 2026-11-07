@@ -25,10 +25,10 @@ import (
 //     LUC/10, critical 1..99 from CriticalSuccess 0x00456fd0).
 //   - Death(target, 1, attacker) announces 0x0504 type 1.
 //
-// Not covered yet: duels and guild duels (IsTeam's PvP states), kill
-// counts and PvP exp/drops in CUser::Death (KillPCFrom, ItemDropByUser,
-// AddExpFromUser), AttackItemOption / BeAttackedItemOption, and hostile
-// skills (the skill CUser::AttackUser 0x0044f4c0).
+// The death's rewards are in pvpdeath.go. Not covered yet: duels and
+// guild duels (IsTeam's PvP states), AttackItemOption /
+// BeAttackedItemOption, and hostile skills (the skill CUser::AttackUser
+// 0x0044f4c0).
 
 const (
 	deathTypeUser    = 0x01
@@ -201,7 +201,7 @@ func (s *Session) applyUserHit(h pendingUserHit) bool {
 	s.lastCombatAt = time.Now()
 	attacker := FindPlayerByID(h.AttackerID)
 	if h.Reflected {
-		killed := s.takeUserDamage(h.Damage[0])
+		killed := s.takeUserDamage(h.AttackerID, h.Damage[0])
 		w := packet.New(0x0515)
 		w.U32(h.AttackerID) // the mirror's owner
 		w.U32(ch.ID)
@@ -236,7 +236,7 @@ func (s *Session) applyUserHit(h pendingUserHit) bool {
 	if mirrored {
 		shown = 0
 	} else {
-		killed = s.takeUserDamage(damage)
+		killed = s.takeUserDamage(h.AttackerID, damage)
 	}
 	sendNear(ch.MapID, ch.PosX, ch.PosZ, CombatRadius,
 		buildCharacterUserAttack(h.AttackerID, ch.ID, code, uint16(min(shown, 65535))), "0x0502 user attack")
@@ -250,19 +250,17 @@ func (s *Session) applyUserHit(h pendingUserHit) bool {
 }
 
 // takeUserDamage is CUser::Damage's HP part; true when it killed.
-func (s *Session) takeUserDamage(damage uint32) bool {
+func (s *Session) takeUserDamage(attackerID, damage uint32) bool {
 	ch := s.char
 	cur := s.stats()
 	if cur.CurrentHP == 0 || damage == 0 {
 		return false
 	}
 	s.wearArmour()
+	s.addDamage(damageByUser, attackerID, damage) // CDamage::Add in CUser::Damage
 	after := satSub(cur.CurrentHP, damage)
 	ch.CurrentHP = satSub(ch.CurrentHP, cur.CurrentHP-after)
 	killed := after == 0
-	if killed {
-		ch.Deaths++
-	}
 	s.persist()
 	s.dismount()
 	if !killed {
@@ -278,6 +276,7 @@ func (s *Session) afterUserDamage(killerID uint32, killed bool) {
 	if !killed {
 		return
 	}
+	s.deathByUser(killerID)
 	state, death := buildCharacterDeathState(ch.ID), buildCharacterDeath(ch.ID, deathTypeUser, killerID)
 	for _, p := range PlayersNear(ch.MapID, ch.PosX, ch.PosZ, CombatRadius) {
 		p.Send(state, "0x051C character death state")

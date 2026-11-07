@@ -901,6 +901,14 @@ func TestUserAttack(t *testing.T) {
 	}
 	enemy.player.TakeUserHits()
 
+	// The enemy carries a droppable item (regular account, Vg 0: 100%).
+	loot := *weapon
+	loot.Bag, loot.Slot = 1, 0
+	enemy.items = []db.Item{loot}
+	enemy.char.Vg = 0
+	// Some mob damage first: the reward still goes to the top damager.
+	enemy.addDamage(damageByMob, 4242, 5)
+
 	// Resolve many swings: some hit, the HP drops, and a crit asks the
 	// attacker's session to wear the weapon.
 	stats := attacker.stats()
@@ -921,6 +929,82 @@ func TestUserAttack(t *testing.T) {
 		t.Fatalf("enemy not killed: dead=%v hp=%d", enemy.dead, enemy.char.CurrentHP)
 	}
 	t.Logf("hits=%d crits=%d", hits, crits)
+	// CUser::Death: GetExp x 1.2 to the killer, KillPCFrom, ItemDropByUser.
+	exp, _ := attacker.player.TakeRewards()
+	if want := uint32(float64(pvpExp(40, 40)) * pvpExpFactor); len(exp) != 1 || exp[0] != want {
+		t.Fatalf("killer exp %v, want [%d]", exp, want)
+	}
+	if enemy.char.Deaths != 1 || len(enemy.damageLedger) != 0 {
+		t.Fatalf("enemy deaths %d ledger %v", enemy.char.Deaths, enemy.damageLedger)
+	}
+	kills := attacker.char.Kills
+	attacker.tickPvP()
+	if attacker.char.Kills != kills+1 {
+		t.Fatalf("killer kills %d, want %d", attacker.char.Kills, kills+1)
+	}
+	if len(enemy.items) != 0 {
+		t.Fatalf("enemy kept %d items", len(enemy.items))
+	}
+	found := false
+	for _, mi := range itemsOnMap(mapID) {
+		if mi.Item.Type == loot.Type && mi.Item.TypeID == loot.TypeID && mi.OwnerID == attacker.char.ID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("dropped item not on the ground for the killer")
+	}
+	clearMapItems(mapID)
+
+	// In a party with division 3: every member near the dead user gets
+	// party exp and a kill; the item is owned by the next member in turn.
+	pt := &party{id: 990901, itemDivision: 3, maxLevel: 40, members: []*ConnectedPlayer{attacker.player, ally.player}}
+	partyMu.Lock()
+	attacker.player.party, ally.player.party = pt, pt
+	partyMu.Unlock()
+	defer func() {
+		partyMu.Lock()
+		attacker.player.party, ally.player.party = nil, nil
+		partyMu.Unlock()
+	}()
+	enemy.dead, enemy.char.CurrentHP = false, enemy.stats().MaxHP
+	enemy.player.SetAlive(true)
+	enemy.items = []db.Item{loot}
+	for i := 0; i < 400 && !enemy.dead; i++ {
+		enemy.player.QueueUserHit(pendingUserHit{AttackerID: attacker.char.ID, Stats: stats, Kind: attackMelee, X: 500, Z: 500})
+		enemy.tickUserHits()
+	}
+	if !enemy.dead {
+		t.Fatal("second kill did not happen")
+	}
+	want := uint32(float64(uint32(float64(pvpExp(40, 40))*partyExpFactor[2])) * partyExpLevelShare(40, 40))
+	for _, m := range []*Session{attacker, ally} {
+		exp, _ := m.player.TakeRewards()
+		if len(exp) != 1 || exp[0] != want {
+			t.Fatalf("member %d exp %v, want [%d]", m.char.ID, exp, want)
+		}
+		before := m.char.Kills
+		m.tickPvP()
+		if m.char.Kills != before+1 {
+			t.Fatalf("member %d kills %d, want %d", m.char.ID, m.char.Kills, before+1)
+		}
+	}
+	if enemy.char.Deaths != 2 {
+		t.Fatalf("enemy deaths %d, want 2", enemy.char.Deaths)
+	}
+	owned := uint32(0)
+	for _, mi := range itemsOnMap(mapID) {
+		if mi.Item.Type == loot.Type && mi.Item.TypeID == loot.TypeID {
+			owned = mi.OwnerID
+			if !mi.NoParty {
+				t.Fatal("division 3 item is party-shared")
+			}
+		}
+	}
+	if owned != attacker.char.ID || pt.itemDivSeq != 1 {
+		t.Fatalf("division 3 owner %d seq %d, want %d and 1", owned, pt.itemDivSeq, attacker.char.ID)
+	}
+	clearMapItems(mapID)
 	if attacker.hostileUser(enemy.char.ID) != nil {
 		t.Fatal("a dead user is attackable")
 	}

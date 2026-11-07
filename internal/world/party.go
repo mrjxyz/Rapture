@@ -47,6 +47,7 @@ type party struct {
 	slots        []uint16 // wire slot per member
 	autoJoin     bool
 	itemDivision int32
+	itemDivSeq   int // m_nItemDivSeq, the rotation for divisions 1 and 3
 }
 
 var (
