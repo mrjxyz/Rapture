@@ -43,6 +43,7 @@ func main() {
 		logger.Printf("Rapture World failed to load data/game (copy the EP4.5 PS_Game/Data files there): %v", err)
 		os.Exit(1)
 	}
+	world.InitKillCount(logger)
 	if err := world.LoadGuilds(logger); err != nil {
 		logger.Printf("Rapture World failed to load guilds: %v", err)
 	}

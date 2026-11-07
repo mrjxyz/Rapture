@@ -310,13 +310,16 @@ func (s *Session) handleGemAdd(p []byte) {
 		fail("no free socket")
 		return
 	}
-	cost := lapisiaMoney(gemDef.ReqIg)
+	// ItemGemAdd: (int)((float)GetGemMoneyByGrade - (float)Vg / 10).
+	cost := uint32(max(math.Trunc(float64(float32(lapisiaMoney(gemDef.ReqIg)))-float64(float32(ch.Vg))/float64(float32(10))), 0))
 	if ch.Money < cost {
 		fail("not enough gold")
 		return
 	}
 	ch.Money -= cost
-	chance := int(math.RoundToEven(float64(ch.Level)*float64(float32(0.05)) + float64(289-8*int(gemDef.ReqIg))))
+	// trunc((float)(289 - 8 ReqIg) + (float)KC type 24 + level x 0.05).
+	chance := int(math.Trunc(float64(float32(289-8*int(gemDef.ReqIg))) + float64(float32(kcWorldType(s.faction, 24))) +
+		float64(float32(ch.Level))*float64(float32(0.05))))
 	chance = max(chance, 1)
 	if hBag != 0 && isValidItemPosition(hBag, hSlot) {
 		if hi := findItem(s.items, hBag, hSlot); hi >= 0 {
@@ -397,7 +400,10 @@ func (s *Session) handleGemRemove(p []byte) {
 	count, risky, first := 0, false, (*db.ItemDef)(nil)
 	for _, g := range item.Gems {
 		if d := defs.Item(gemItemType, g); g != 0 && d != nil {
-			cost += lapisiaMoney(d.ReqIg)
+			// ItemGemRemoveAll: GetGemMoneyByGrade - Vg / 10, when positive.
+			if c := int64(lapisiaMoney(d.ReqIg)) - int64(ch.Vg/10); c > 0 {
+				cost += uint32(c)
+			}
 			count++
 			risky = risky || d.ReqVg != 0
 			if first == nil {
@@ -423,7 +429,8 @@ func (s *Session) handleGemRemove(p []byte) {
 		return
 	}
 	ch.Money -= cost
-	chance := min(max(int(math.RoundToEven(float64(ch.Level)*float64(float32(0.05))+float64(289-8*int(first.ReqIg)))), 1), 50)
+	chance := min(max(int(math.Trunc(float64(float32(289-8*int(first.ReqIg)))+float64(float32(kcWorldType(s.faction, 24)))+
+		float64(float32(ch.Level))*float64(float32(0.05)))), 1), 50)
 	if rand.IntN(100) >= chance {
 		i := findItemByUID(s.items, uid)
 		s.items[i].Gems = [maxGemSlots]uint8{}

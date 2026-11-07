@@ -77,8 +77,9 @@ type ConnectedPlayer struct {
 	guild    playerGuildState // guarded by guildMu
 	soulKill bool
 
-	alive    atomic.Bool
-	debuffed atomic.Bool // an active debuff (PvPHaveDebuff), refreshed by its session
+	alive     atomic.Bool
+	debuffed  atomic.Bool // an active debuff (PvPHaveDebuff), refreshed by its session
+	kcRefresh atomic.Bool // the country tier changed (ApplyKillCount)
 
 	duel duelState // guarded by duelMu
 

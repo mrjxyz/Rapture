@@ -1374,3 +1374,30 @@ func TestGuildDuel(t *testing.T) {
 		t.Fatal("still foes after the guild duel")
 	}
 }
+
+// TestGodBlessStorage round-trips the country kill counts through
+// usp_Save_GodBless_E / usp_Read_GodBless_R and leaves them at 0.
+func TestGodBlessStorage(t *testing.T) {
+	if _, err := os.Stat("data/game"); err != nil {
+		os.Chdir("../..")
+	}
+	config.LoadRuntimeEnv()
+	if err := db.Open(db.UserData, db.GameData, db.GameDefs); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := db.ReadGodBless(); err != nil {
+		t.Fatal(err)
+	}
+	kcSave(1234, 567, testLog{t})
+	l, d, err := db.ReadGodBless()
+	if err != nil || l != 1234 || d != 567 {
+		t.Fatalf("read %d/%d err %v", l, d, err)
+	}
+	if err := db.SaveGodBless(0, 0); err != nil {
+		t.Fatal(err)
+	}
+}
+
+type testLog struct{ t *testing.T }
+
+func (l testLog) Printf(format string, args ...any) { l.t.Logf(format, args...) }

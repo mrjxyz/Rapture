@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -239,4 +240,45 @@ func SaveGuildRanking(g GuildRow) error {
 		return err
 	}
 	return mirrorGuild(g.ID)
+}
+
+// ReadGodBless is usp_Read_GodBless_R (ps_dbAgent CWorld::DBKillCountLoad):
+// the light and dark country kill counts, 0 without a row.
+func ReadGodBless() (light, dark uint32, err error) {
+	pool, err := Pool(GameData)
+	if err != nil {
+		return 0, 0, err
+	}
+	c, cancel := ctx()
+	defer cancel()
+	var l, d sql.NullInt64
+	err = pool.QueryRowContext(c, "dbo.usp_Read_GodBless_R").Scan(&l, &d)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, 0, nil
+	}
+	if err != nil {
+		return 0, 0, fmt.Errorf("usp_Read_GodBless_R: %w", err)
+	}
+	return uint32(l.Int64), uint32(d.Int64), nil
+}
+
+// ErrNoWorldInfo is usp_Save_GodBless_E's -1: PS_GameData.dbo.WorldInfo
+// has no row yet (the world calendar creates it).
+var ErrNoWorldInfo = errors.New("WorldInfo has no row")
+
+// SaveGodBless is usp_Save_GodBless_E (CWorld::DBKillCountSave): 1 saved,
+// -1 without a WorldInfo row.
+func SaveGodBless(light, dark uint32) error {
+	status, err := execStatus("dbo.usp_Save_GodBless_E", sql.Named("GodBless_Light", int32(light)), sql.Named("GodBless_Dark", int32(dark)))
+	if err == nil && status < 0 {
+		err = ErrNoWorldInfo
+	}
+	return err
+}
+
+// SaveWorldInfo is usp_Save_WorldInfo_E (the DB agent's world calendar
+// save), which creates the WorldInfo row when missing.
+func SaveWorldInfo(lastWorldTime int32) error {
+	_, err := execStatus("dbo.usp_Save_WorldInfo_E", sql.Named("LastWorldTime", lastWorldTime))
+	return err
 }

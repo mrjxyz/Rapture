@@ -169,12 +169,16 @@ const deathExpPercent = 5
 
 // expDrop is CUser::ExpDrop (0x0045ad50): above level 10, percent of the
 // level's exp span, never below the level's start.
-func expDrop(ch *db.Character, percent int) uint32 {
+func expDrop(ch *db.Character, percent int, faction uint8) uint32 {
 	if ch.Level <= 10 || percent <= 0 {
 		return 0
 	}
 	prev, next := expBounds(ch)
 	loss := int64(math.RoundToEven(float64(float32(percent)) / 100 * float64(float32(int32(next-prev)))))
+	// The country tier's type 25 cuts the loss by that percent.
+	if cut := kcWorldType(faction, 25); cut != 0 {
+		loss -= int64(math.RoundToEven(float64(float32(cut)) / 100 * float64(float32(int32(loss)))))
+	}
 	room := int64(ch.Exp) - int64(prev)
 	if room < 1 {
 		return 0

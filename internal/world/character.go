@@ -89,11 +89,19 @@ type EquipmentStats struct {
 	MoveSpeed     int32
 	CrossRoad     int32    // passive detail 9: no close-range bow penalty
 	SitRecoverPct [3]int32 // abilities 10-12: extra sitting recovery % (HP, SP, MP)
-	SPCostCut     int32    // ability 13 / 14: percent off skill costs
-	MPCostCut     int32
-	Disabled      [3]int32 // abilities 32-34: no attacks of that category
-	WeaponType    uint8    // real type of the equipped weapon (0 none)
-	ShieldType    uint8    // real type of the equipped shield (0 none)
+	// Flat recovery from Special 16 gems (CUser +0x1250 sitting, +0x1268
+	// standing; HP, SP, MP).
+	GemRecover [3]uint32
+	// Country kill count tier (CUser::UpdateKCStatus) percents.
+	KCPoolPct    [3]int32 // types 1-3: max HP, MP, SP
+	KCRecoverPct [3]int32 // types 10-12: sitting/standing recovery, of max HP, SP, MP
+	KCCombatPct  [3]int32 // types 13-15: in-combat recovery, of max HP, SP, MP
+	KCGuardPct   [2]int32 // types 18-19: melee/ranged defense
+	SPCostCut    int32    // ability 13 / 14: percent off skill costs
+	MPCostCut    int32
+	Disabled     [3]int32 // abilities 32-34: no attacks of that category
+	WeaponType   uint8    // real type of the equipped weapon (0 none)
+	ShieldType   uint8    // real type of the equipped shield (0 none)
 }
 
 // CategoryMods are SetSkillAbility's per-category additions.
@@ -124,6 +132,9 @@ func itemElement(it *db.Item, d *db.ItemDef) uint8 {
 }
 
 const gemItemType = 30
+
+// specialRecoverGem is the gem Special that turns its pools into recovery.
+const specialRecoverGem = 16
 
 // IsWeaponItemType: Type 1-15 and 45-65.
 func IsWeaponItemType(t uint8) bool { return (t >= 1 && t <= 15) || (t >= 45 && t <= 65) }
@@ -217,6 +228,16 @@ func GetEquipmentStats(items []db.Item) EquipmentStats {
 				continue
 			}
 			if g := defs.Item(gemItemType, gem); g != nil {
+				if g.Special == specialRecoverGem {
+					// GemEquipmentAdd: Special 16 turns the gem's HP/SP/MP
+					// into sitting and standing recovery.
+					rg := *g
+					rg.ConstHP, rg.ConstSP, rg.ConstMP = 0, 0, 0
+					e.GemRecover[0] = satAdd(e.GemRecover[0], pos16(g.ConstHP))
+					e.GemRecover[1] = satAdd(e.GemRecover[1], pos16(g.ConstSP))
+					e.GemRecover[2] = satAdd(e.GemRecover[2], pos16(g.ConstMP))
+					g = &rg
+				}
 				e.addItemDef(gemItemType, g, 0)
 				// CUser::GemEquipmentAdd: gems also add reach and speed.
 				e.Range += int32(g.Range)
@@ -287,8 +308,12 @@ type CharacterStats struct {
 	MoveSpeed    int32
 	Disabled     [3]int32
 	SitRecover   [3]int32
-	SPCostCut    int32
-	MPCostCut    int32
+	// Recover is CUser::UpdateRecover's flat amounts per mode (0 sitting,
+	// 1 standing, 2 in combat) and pool (HP, SP, MP): InitEquipment's 28
+	// sitting and 4 standing, plus gems and the country tier.
+	Recover   [3][3]uint32
+	SPCostCut int32
+	MPCostCut int32
 }
 
 func StatsFor(ch *db.Character, e EquipmentStats) CharacterStats {
@@ -314,10 +339,38 @@ func StatsFor(ch *db.Character, e EquipmentStats) CharacterStats {
 	s.CurrentHP = min(satAdd(satAdd(curHP, e.MaxHP), dHP), s.MaxHP)
 	s.CurrentMP = min(satAdd(satAdd(curMP, e.MaxMP), dMP), s.MaxMP)
 	s.CurrentSP = min(satAdd(satAdd(curSP, e.MaxSP), dSP), s.MaxSP)
+	// Country tier: percents of the maximum pools (types 1-3).
+	for i, p := range []*[2]*uint32{{&s.MaxHP, &s.CurrentHP}, {&s.MaxMP, &s.CurrentMP}, {&s.MaxSP, &s.CurrentSP}} {
+		if add := kcPercent(*p[0], e.KCPoolPct[i]); add > 0 {
+			*p[0] = satAdd(*p[0], add)
+			*p[1] = min(satAdd(*p[1], add), *p[0])
+		}
+	}
 	setAttack(&s, e)
+	// Types 18/19: a percent of the melee / ranged defense.
+	for k := 0; k < 2; k++ {
+		if e.KCGuardPct[k] != 0 {
+			s.Guard[k] += int32(kcPercent(uint32(max(s.Guard[k], 0)), e.KCGuardPct[k]))
+		}
+	}
+	s.Defense = uint32(max(s.Guard[attackMelee], 0))
 	s.Absorption = e.Absorption
+	pools := [3]uint32{s.MaxHP, s.MaxSP, s.MaxMP}
+	for i := 0; i < 3; i++ {
+		kc := kcPercent(pools[i], e.KCRecoverPct[i])
+		s.Recover[0][i] = satAdd(satAdd(recoverBaseSitting, e.GemRecover[i]), kc)
+		s.Recover[1][i] = satAdd(satAdd(recoverBaseStanding, e.GemRecover[i]), kc)
+		s.Recover[2][i] = kcPercent(pools[i], e.KCCombatPct[i])
+	}
 	return s
 }
+
+// InitEquipment's base recovery: 28 per pool sitting, 4 standing, 0 in
+// combat.
+const (
+	recoverBaseSitting  = 28
+	recoverBaseStanding = 4
+)
 
 func recoveryAmount(value, maxValue uint32, special uint8) uint32 {
 	if special == specialPercentHealingPotion {

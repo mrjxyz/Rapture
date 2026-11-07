@@ -206,6 +206,9 @@ func LoadGameConfig(log *logx.Logger) error {
 	if err := loadNpcQuest(log); err != nil {
 		return fmt.Errorf("NpcQuest.SData: %w", err)
 	}
+	if err := loadKillStatus(log); err != nil {
+		return fmt.Errorf("KillStatus.SData: %w", err)
+	}
 	return nil
 }
 

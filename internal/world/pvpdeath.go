@@ -171,6 +171,7 @@ func (s *Session) killPCTo() {
 	}
 	ch.Kills++
 	s.persist()
+	AddKillCount(s.faction, 1, s.log) // CWorld::AddKillCount for the killer's country
 	s.send(buildKillCountUpdate(0, ch.Kills), "0x020E kills")
 	w := packet.New(0x0522)
 	w.U32(ch.ID)

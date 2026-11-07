@@ -85,7 +85,7 @@ func (s *Session) tickRebirth(now time.Time) {
 func (s *Session) killSoul() {
 	ch := s.char
 	if ch.Mode != growUltimate || s.deathLoss < 0 {
-		lost := expDrop(ch, s.deathLoss)
+		lost := expDrop(ch, s.deathLoss, s.faction)
 		m, x, y, z := bindPosition(ch.MapID, s.faction, ch.PosX, ch.PosY, ch.PosZ)
 		s.rebirth(m, x, y, z, rebirthKindBind, true, lost)
 		return
@@ -144,7 +144,7 @@ func (s *Session) killSoulParty() {
 		s.killSoul()
 		return
 	}
-	lost := expDrop(ch, s.deathLoss)
+	lost := expDrop(ch, s.deathLoss, s.faction)
 	pos := l.Snapshot()
 	s.rebirth(ch.MapID, pos.PosX, pos.PosY, pos.PosZ, rebirthKindParty, true, lost)
 }
@@ -287,7 +287,7 @@ func (s *Session) rebirth(mapID uint16, x, y, z float32, kind uint8, restore boo
 // LeaveDead.
 func (s *Session) ultimateDeath() {
 	ch := s.char
-	expDrop(ch, s.deathLoss)
+	expDrop(ch, s.deathLoss, s.faction)
 	s.persist()
 	s.log.Printf("Rapture World ultimate death character_id=%d (no resurrection rune)", ch.ID)
 	s.endUltimateCharacter()

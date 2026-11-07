@@ -74,7 +74,7 @@ type Session struct {
 	usingNpc         uint32
 	quests           []*activeQuest
 	finishedQuests   []db.FinishedQuest
-	regenSitting     bool
+	regenMode        int // CUser +0x1274: 0 sitting, 1 standing, 2 in combat (next tick's recovery)
 	lastCombatAt     time.Time
 	shoutReadyAt     time.Time      // 0x1107 cooldown (CUser +0x5848)
 	wornItems        map[int64]bool // item UIDs whose quality changed
@@ -187,7 +187,9 @@ func (s *Session) send(frame []byte, label string) {
 func (s *Session) equipment() EquipmentStats {
 	e := GetEquipmentStats(s.items)
 	applyPassives(&e, s.skills)
-	return addBuffs(e, s.buffs)
+	e = addBuffs(e, s.buffs)
+	applyKCStatus(&e, s.faction)
+	return e
 }
 func (s *Session) stats() CharacterStats { return StatsFor(s.char, s.equipment()) }
 
@@ -252,6 +254,9 @@ func (s *Session) tick(idle bool) {
 	s.tickUserHits()
 	s.tickPvP()
 	s.tickDuel()
+	if s.player != nil && s.player.kcRefresh.Swap(false) {
+		s.sendStatPackets() // ApplyKillCountAllUser -> UpdateKCStatus
+	}
 	s.tickGuildDuel()
 	s.applyDuelWins()
 	if s.player != nil {
@@ -301,29 +306,44 @@ func (s *Session) applyTradeRefresh(r *tradeRefresh) {
 	s.send(buildSetMoney(s.char.Money), "0x0213 trade refresh money")
 }
 
-// recoveryTick is the original 5-second recovery: nothing in combat,
-// 5% of each max while sitting, and while standing only flat equipment
-// recovery (not modeled yet, so none). Like the original, the posture
-// seen at one tick decides the next tick's amount. Viewers get 0x0505
-// (deltas) and the character 0x0521 when a pool tops out or it sits.
+// recoveryTick is CUser::UpdateRecover every 5 seconds: the mode seen at
+// the previous tick decides the amount (0 sitting: 5% of each maximum plus
+// the sitting abilities' percent plus the flat sitting recovery; 1
+// standing: the flat standing recovery; 2 in combat: the flat in-combat
+// recovery), then the mode for the next tick is taken (in combat, else
+// sitting or standing). Viewers get 0x0505 (deltas) and the character
+// 0x0521.
 func (s *Session) recoveryTick() {
 	if time.Since(s.lastRegenAt) < recoveryInterval {
 		return
 	}
 	s.lastRegenAt = time.Now()
-	sitting := s.regenSitting
-	if s.player != nil {
-		s.regenSitting = s.player.IsSitting()
+	mode := s.regenMode
+	switch {
+	case s.inCombat():
+		s.regenMode = 2
+	case s.player != nil && s.player.IsSitting():
+		s.regenMode = 0
+	default:
+		s.regenMode = 1
 	}
-	if s.dead || s.inCombat() || !sitting {
+	if s.dead {
 		return
 	}
 	st := s.stats()
 	if st.CurrentHP == 0 {
 		return
 	}
-	hp, mp, sp := s.healDelta(sittingRecovery(st.MaxHP, st.SitRecover[0]), sittingRecovery(st.MaxMP, st.SitRecover[2]),
-		sittingRecovery(st.MaxSP, st.SitRecover[1]))
+	var hp, mp, sp uint32
+	r := st.Recover[mode]
+	if mode == 0 {
+		hp = sittingRecovery(st.MaxHP, st.SitRecover[0], r[0])
+		sp = sittingRecovery(st.MaxSP, st.SitRecover[1], r[1])
+		mp = sittingRecovery(st.MaxMP, st.SitRecover[2], r[2])
+	} else {
+		hp, sp, mp = r[0], r[1], r[2]
+	}
+	hp, mp, sp = s.healDelta(hp, mp, sp)
 	if hp+mp+sp == 0 {
 		return
 	}
@@ -772,7 +792,7 @@ func (s *Session) selectCharacter(id uint32) {
 	s.logErr("load points", err)
 	s.loadQuests()
 	s.mounted, s.dead, s.cast, s.autoAttack = false, false, nil, false
-	s.lastRegenAt = time.Now()
+	s.lastRegenAt, s.regenMode = time.Now(), 1 // InitEquipment
 	st := s.stats()
 	s.log.Printf("Rapture World selected character id=%d items=%d skills=%d buffs=%d hp=%d/%d", id, len(s.items), len(s.skills), len(s.buffs), st.CurrentHP, st.MaxHP)
 	s.send(buildCharResult(packet.SelectCharacter, true, id), "0x0104 select character ok")
@@ -791,6 +811,7 @@ func (s *Session) sendInitialState(st *CharacterStats) {
 		{buildKillCountUpdate(1, ch.Deaths), "0x020E deaths"},
 		{buildKillCountUpdate(2, ch.Victories), "0x020E victories"},
 		{buildKillCountUpdate(3, ch.Defeats), "0x020E defeats"},
+		{buildKCStatus(s.faction), "0x0211 country kill count"},
 		{buildAdditionalStats(st), "0x0526 additional stats"},
 		{buildMaxHPMPSP(ch, st), "0x051F max hp/mp/sp"},
 		{buildMaxEnergy(ch, 0, st.MaxHP), "0x050B max hp"},
