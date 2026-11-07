@@ -113,3 +113,24 @@ func TestDamageLedgerTop(t *testing.T) {
 		t.Fatalf("top %+v, want user 2 with 51", top)
 	}
 }
+
+// The magic branch of AttackDamage 0x00457030 against a user: equal
+// levels give the level term's floor 1; guard 100 over weapon attack 0 +
+// INT 200 resists 50%: 1000 x (1 - 51/100) = 490 (735 on a critical).
+func TestUserMagicDamage(t *testing.T) {
+	att := CharacterStats{Level: 60, Int: 200}
+	att.Attack[attackMagic] = 1000
+	def := CharacterStats{Level: 60}
+	def.Guard[attackMagic] = 100
+	for i := 0; i < 300; i++ {
+		var d [3]int32
+		crit := userWeaponDamage(&att, &def, attackMagic, &d, 0, 0, false)
+		want := int32(490)
+		if crit {
+			want = 735
+		}
+		if d[0] != want {
+			t.Fatalf("magic damage %d crit=%v, want %d", d[0], crit, want)
+		}
+	}
+}

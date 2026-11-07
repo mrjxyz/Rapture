@@ -69,7 +69,7 @@ func setAttack(s *CharacterStats, e EquipmentStats) {
 	s.Attack[attackMagic] = truncInt(float64(intel*1.3 + wis*0.2 + float32(magic.Attack) + item))
 	s.Accuracy[attackMagic], s.Evasion[attackMagic] = magic.Accuracy, magic.Evasion
 	s.Guard[attackMagic] = magic.Defense + int32(e.Resistance) + int32(s.Wis)
-	s.Variance, s.AttackAttr, s.RangedWeapon = e.Variance, e.AttackAttr, e.RangedWeapon
+	s.Variance, s.AttackAttr, s.RangedWeapon, s.ItemAttack = e.Variance, e.AttackAttr, e.RangedWeapon, e.ItemAttack
 	s.DefenseAttr, s.CrossRoad, s.Range, s.AttackSpeed = e.DefenseAttr, e.CrossRoad, e.Range, e.AttackSpeed
 	s.SPCostCut, s.MPCostCut, s.MoveSpeed, s.Disabled = e.SPCostCut, e.MPCostCut, e.MoveSpeed, e.Disabled
 	s.SitRecover = e.SitRecoverPct
@@ -277,7 +277,7 @@ func playerSkillDamage(s *CharacterStats, m *mobCombat, def *db.SkillDef, t skil
 
 // playerSkillHits is CUser::AttackSuccess with a skill: mobs resist a
 // skill's StateType or its ID outright; SuccessType 1-3 roll SuccessValue
-// (2 and 3 add WIS or LUC against the mob's, as an integer ratio);
+// (2 and 3 add LUC or WIS against the mob's, as an integer ratio);
 // otherwise the normal hit chance of the skill's category applies.
 func playerSkillHits(s *CharacterStats, m *mobCombat, md *db.MobDef, def *db.SkillDef) bool {
 	if def.StateType != 0 && md.ResistState[def.StateType-1] != 0 {
@@ -291,9 +291,11 @@ func playerSkillHits(s *CharacterStats, m *mobCombat, md *db.MobDef, def *db.Ski
 	if def.SuccessType >= 1 && def.SuccessType <= 3 {
 		chance := int32(def.SuccessValue)
 		if def.SuccessType != 1 {
-			mine, theirs := int32(s.Wis), int32(md.Wis)
+			// 2 reads LUC (CUser +0x1234, stMOBInfo +0x3c), 3 WIS
+			// (+0x122c, +0x3a).
+			mine, theirs := int32(s.Luc), int32(md.Luc)
 			if def.SuccessType == 3 {
-				mine, theirs = int32(s.Luc), int32(md.Luc)
+				mine, theirs = int32(s.Wis), int32(md.Wis)
 			}
 			if mine+theirs != 0 {
 				chance += mine / (mine + theirs) * 100
@@ -446,9 +448,9 @@ func mobSkillHits(m *mobCombat, md *db.MobDef, def *db.SkillDef, s *CharacterSta
 	if def.SuccessType >= 1 && def.SuccessType <= 3 {
 		chance := int32(def.SuccessValue)
 		if def.SuccessType != 1 {
-			mine, theirs := int32(md.Wis), int32(s.Wis)
+			mine, theirs := int32(md.Luc), int32(s.Luc) // 2 LUC, 3 WIS
 			if def.SuccessType == 3 {
-				mine, theirs = int32(md.Luc), int32(s.Luc)
+				mine, theirs = int32(md.Wis), int32(s.Wis)
 			}
 			if mine+theirs != 0 {
 				chance += mine / (mine + theirs) * 100

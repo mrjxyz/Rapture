@@ -277,6 +277,7 @@ type CharacterStats struct {
 	Guard        [3]int32 // defense per category
 	Critical     int32
 	Variance     uint32
+	ItemAttack   uint32 // the weapon's own attack (CUser +0x12d8)
 	AttackAttr   uint8
 	DefenseAttr  uint8
 	RangedWeapon bool

@@ -94,6 +94,12 @@ func (s *Session) skillAttack(k db.CharacterSkill, def *db.SkillDef, target uint
 		if def.TypeDetail == detailDrain {
 			return
 		}
+		// Around a mob (TargetType 7) the hostile users are hit first
+		// (SkillAttackRangeSelect 0x00450f70); 0x0517 around the caster
+		// reaches mobs only.
+		if def.TargetType == targetTypeEnemiesNearTarget {
+			s.areaUserHits(def, k, x, z)
+		}
 		for _, id := range mobsWithin(ch.MapID, x, z, float32(def.ApplyRange)) {
 			s.skillStrike(id, def, k, false)
 		}
@@ -246,7 +252,13 @@ func (s *Session) skillHit(target uint32, def *db.SkillDef, k db.CharacterSkill,
 // buildSkillDrainResult (0x0518): the 0x0517 layout plus the healed
 // HP/SP/MP.
 func buildSkillDrainResult(result uint8, sender, target uint32, skillID uint16, level uint8, damage, healed [3]uint16) []byte {
-	w := packet.New(opSkillDrain)
+	return buildDrainPacket(opSkillDrain, result, sender, target, skillID, level, damage, healed)
+}
+
+// buildDrainPacket is the drain layout shared by 0x0518 (on a mob) and
+// 0x0512 (on a user).
+func buildDrainPacket(op packet.Opcode, result uint8, sender, target uint32, skillID uint16, level uint8, damage, healed [3]uint16) []byte {
+	w := packet.New(op)
 	w.U8(result)
 	w.U32(sender)
 	w.U32(target)

@@ -1009,3 +1009,117 @@ func TestUserAttack(t *testing.T) {
 		t.Fatal("a dead user is attackable")
 	}
 }
+
+// TestUserSkills follows CUser::SkillAttack / SkillDebuff (user target)
+// and CUser::AttackUser(skill) 0x0044f4c0: a single-target attack skill
+// sent as 0x0511 reaches a hostile user only, an area skill around the
+// caster reaches hostile users, and a debuff stays on the target.
+func TestUserSkills(t *testing.T) {
+	if _, err := os.Stat("data/game"); err != nil {
+		os.Chdir("../..")
+	}
+	config.LoadRuntimeEnv()
+	if err := db.Open(db.UserData, db.GameData, db.GameDefs); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ReloadDefsForTest(); err != nil {
+		t.Fatal(err)
+	}
+	logger, err := logx.New("rapture_world_test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const mapID = 60052
+	session := func(id uint32, faction uint8, x float32) *Session {
+		a, b := net.Pipe()
+		go io.Copy(io.Discard, b)
+		ch := &db.Character{ID: id, Level: 60, Mode: growNormal, Str: 200, Dex: 80, Rec: 50, Int: 200, Wis: 50, Luc: 50,
+			MapID: mapID, PosX: x, PosY: 11, PosZ: 500}
+		ch.MaxHP, ch.MaxMP, ch.MaxSP = basePools(ch)
+		ch.CurrentHP, ch.CurrentMP, ch.CurrentSP = ch.MaxHP, ch.MaxMP, ch.MaxSP
+		s := &Session{char: ch, log: logger.Tagged("unit"), logger: logger, faction: faction,
+			skillCooldowns: map[uint16]time.Time{}, out: &connWriter{conn: a}}
+		s.player = RegisterPlayer(*ch, nil, false, faction, s.out, logger)
+		s.player.SetAlive(true)
+		t.Cleanup(s.player.Unregister)
+		return s
+	}
+	caster := session(900301, FactionLight, 500)
+	ally := session(900302, FactionLight, 501)
+	enemy := session(900303, FactionDark, 501)
+	find := func(label string, ok func(*db.SkillDef) bool) *db.SkillDef {
+		var best *db.SkillDef
+		for _, d := range db.MustDefs().Skills {
+			if d.SkillLevel == 1 && ok(d) && (best == nil || d.SkillID < best.SkillID) {
+				best = d
+			}
+		}
+		if best == nil {
+			t.Skipf("no %s skill", label)
+		}
+		return best
+	}
+	single := find("single", func(d *db.SkillDef) bool {
+		return d.TypeEffect == typeEffectAttack && d.TargetType == targetTypeOther && d.TypeDetail == detailAttack &&
+			d.Kind == attackMagic && d.DamageType == 1 && d.SuccessType == 0 && d.AttackRange >= 5
+	})
+	area := find("area", func(d *db.SkillDef) bool {
+		return d.TypeEffect == typeEffectAttack && d.TargetType == targetTypeEnemiesNearCaster && d.ApplyRange >= 2
+	})
+	debuff := find("debuff", func(d *db.SkillDef) bool {
+		return d.TypeEffect == typeEffectDebuff && d.TargetType == targetTypeOther && d.SuccessType == 1 && d.SuccessValue > 0 &&
+			d.DamageType == 0 && d.DamageHP == 0 && d.KeepSeconds > 0
+	})
+	t.Logf("single=%d area=%d debuff=%d", single.SkillID, area.SkillID, debuff.SkillID)
+	use := func(def *db.SkillDef, target uint32) {
+		caster.skillCooldowns = map[uint16]time.Time{}
+		caster.char.CurrentMP, caster.char.CurrentSP = caster.char.MaxMP, caster.char.MaxSP
+		caster.userSkillAttack(db.CharacterSkill{SkillID: def.SkillID, Level: 1, Number: 1}, def, target, nil, caster.stats())
+	}
+
+	use(single, ally.char.ID)
+	if n := len(ally.player.userHits); n != 0 {
+		t.Fatalf("an ally received %d skill hits", n)
+	}
+	before := enemy.char.CurrentHP
+	hit := false
+	for i := 0; i < 50 && !hit; i++ {
+		use(single, enemy.char.ID)
+		if len(enemy.player.userHits) != 1 || !enemy.player.userHits[0].First {
+			t.Fatalf("single skill queued %+v", enemy.player.userHits)
+		}
+		enemy.tickUserHits()
+		hit = enemy.char.CurrentHP < before
+		enemy.char.CurrentHP = enemy.stats().MaxHP
+	}
+	if !hit {
+		t.Fatal("50 magic skills never hurt the enemy")
+	}
+	if len(enemy.damageLedger) == 0 || enemy.damageLedger[0].ID != caster.char.ID {
+		t.Fatalf("ledger %+v", enemy.damageLedger)
+	}
+
+	use(area, 0)
+	wantHits := 1
+	if area.TypeDetail == detailMulti {
+		wantHits = int(area.MultiAttack)
+	}
+	if len(enemy.player.userHits) != wantHits || enemy.player.userHits[0].First || len(ally.player.userHits) != 0 {
+		t.Fatalf("area skill: enemy %d hits ally %d hits", len(enemy.player.userHits), len(ally.player.userHits))
+	}
+	enemy.player.TakeUserHits()
+
+	found := false
+	for i := 0; i < 60 && !found && !enemy.dead; i++ {
+		use(debuff, enemy.char.ID)
+		enemy.tickUserHits()
+		for _, b := range enemy.buffs {
+			if b.SkillID == debuff.SkillID && b.CasterUser == caster.char.ID {
+				found = true
+			}
+		}
+	}
+	if !found && !enemy.dead {
+		t.Fatalf("debuff %d not on the enemy (buffs %d)", debuff.SkillID, len(enemy.buffs))
+	}
+}

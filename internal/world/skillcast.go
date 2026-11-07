@@ -30,6 +30,7 @@ type ActiveBuff struct {
 	DefenceType            uint8
 	BlockLeft              uint32 // detail 85 blocks left / 86 chance
 	CasterMob              uint32 // the mob that applied a debuff
+	CasterUser             uint32 // the user that applied a debuff (its damage counts as theirs)
 	prevTick               time.Time
 	Abilities              [3]buffAbility
 	HealHP, HealSP, HealMP uint32
@@ -203,6 +204,22 @@ func (s *Session) handleUseSkill(op packet.Opcode, p []byte) {
 			return
 		}
 		castTarget = p.CharacterID
+	} else if op == opUserSkillPvP && (def.TypeEffect == typeEffectAttack || def.TypeEffect == typeEffectDebuff) {
+		// A hostile skill on a user: ChkTargetUser before the cast.
+		if def.TargetType != targetTypeEnemiesNearCaster {
+			p := s.hostileUser(target)
+			if p == nil {
+				s.send(buildSkillUseResult(packet.SkillUseNoTarget, skillResultNotTarget, ch.ID, 0, k.SkillID, k.Level, 0, 0, 0),
+					"0x0511 skill target refused")
+				return
+			}
+			if !s.inUserSkillRange(p, def) {
+				s.send(buildSkillUseResult(packet.SkillUseNoTarget, 5, ch.ID, 0, k.SkillID, k.Level, 0, 0, 0), "0x0511 skill out of range")
+				return
+			}
+			x, z := p.PositionXZ()
+			castTarget, pos = p.CharacterID, &[2]float32{x, z}
+		}
 	} else if castTarget != ch.ID && def.TargetType != targetTypeEnemiesNearCaster {
 		mob, ok := MobByID(ch.MapID, target)
 		if !ok {
@@ -256,7 +273,11 @@ func (s *Session) resolveSkill(target uint32, number uint8, op packet.Opcode, ca
 	case typeEffectBuff, typeEffectHeal:
 		s.friendlySkill(k, def, target, stats)
 	case typeEffectAttack, typeEffectDebuff:
-		s.skillAttack(k, def, target, castPos, stats)
+		if op == opUserSkillPvP {
+			s.userSkillAttack(k, def, target, castPos, stats)
+		} else {
+			s.skillAttack(k, def, target, castPos, stats)
+		}
 	case typeEffectOnce:
 		s.skillOnce(k, def, target, stats)
 	default:

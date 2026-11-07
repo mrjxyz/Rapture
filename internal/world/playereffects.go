@@ -202,7 +202,12 @@ func (s *Session) tickDebuffs(now time.Time) bool {
 			continue
 		}
 		hp := uint32(max(damage[0], 0))
-		killed := s.takeMobDamage(pendingDamage{MobGlobalID: b.CasterMob}, hp, nil)
+		var killed bool
+		if b.CasterUser != 0 {
+			killed = s.takeUserDamage(b.CasterUser, hp)
+		} else {
+			killed = s.takeMobDamage(pendingDamage{MobGlobalID: b.CasterMob}, hp, nil)
+		}
 		w := packet.New(packet.SkillKeep)
 		w.U32(ch.ID)
 		w.U16(b.SkillID)
@@ -212,7 +217,11 @@ func (s *Session) tickDebuffs(now time.Time) bool {
 		w.U16(uint16(min(max(damage[2], 0), 65535)))
 		sendNear(ch.MapID, ch.PosX, ch.PosZ, CombatRadius, w.MustFinish(), "0x050F debuff damage")
 		if killed {
-			s.afterMobDamage(pendingDamage{MobGlobalID: b.CasterMob}, true)
+			if b.CasterUser != 0 {
+				s.afterUserDamage(b.CasterUser, true)
+			} else {
+				s.afterMobDamage(pendingDamage{MobGlobalID: b.CasterMob}, true)
+			}
 			s.dead, s.autoAttack, s.cast = true, false, nil
 			s.clearBuffsOnDeath()
 			return true
