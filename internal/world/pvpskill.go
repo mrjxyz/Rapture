@@ -183,6 +183,7 @@ func (s *Session) applyUserSkillHit(h pendingUserHit, stats CharacterStats) bool
 		send(attackResultMiss, [3]uint16{}, [3]uint16{}, "pvp skill (miss)")
 		return false
 	}
+	duelHitBy(s.player, h.AttackerID) // PvPChkLeaveByAttack
 	closeRanged := DistanceXZ(h.X, h.Z, ch.PosX, ch.PosZ) <= closeRangeDistance
 	mirrored := s.reflects(kind, nil)
 	damage, crit := userSkillDamage(&h.Stats, &stats, sk, h.Caster, closeRanged)

@@ -64,6 +64,7 @@ type Session struct {
 	autoAttackTarget uint32
 	autoAttackUser   bool          // the target is a user (0x0502), else a mob
 	damageLedger     []damageEntry // CDamage: HP damage taken per attacker since the last death
+	duelDeathMark    bool          // the last death was a lost duel (m_nVehicleStatus -1)
 	lastAutoAttackAt time.Time
 
 	positionDirty    bool
@@ -250,6 +251,8 @@ func (s *Session) tick(idle bool) {
 	s.tickFriendly()
 	s.tickUserHits()
 	s.tickPvP()
+	s.tickDuel()
+	s.applyDuelWins()
 	if s.player != nil {
 		for n := s.player.TakeWeaponWear(); n > 0; n-- {
 			s.wearWeapon()
@@ -590,6 +593,8 @@ func (s *Session) dispatch(op packet.Opcode, p []byte) {
 		s.handleSkillBar(p)
 	case packet.AutoAttackStop, packet.TargetClear:
 		s.autoAttack = false
+	case 0x2401, 0x2402, 0x2406, 0x2409, 0x240A, 0x240B, 0x240C:
+		s.handleDuel(op, p)
 	case packet.ResurrectRequest:
 		s.handleResurrect(p)
 	case packet.ItemRepair:

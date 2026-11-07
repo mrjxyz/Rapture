@@ -149,6 +149,7 @@ func (s *Session) sacrifice() {
 	}
 	if s.player != nil {
 		s.player.SetAlive(false)
+		duelLeave(s.player, 3, true) // PvPChkLeaveByDeath
 	}
 	s.dead, s.autoAttack, s.cast = true, false, nil
 	s.clearBuffsOnDeath()
@@ -289,10 +290,20 @@ func (s *Session) inSkillRange(m *MapMob, def *db.SkillDef, st *CharacterStats) 
 // ends except those with FixRange set.
 func (s *Session) clearBuffsOnDeath() {
 	s.deathLoss = s.deathExpLoss()
+	duelDeath := s.duelDeathMark
+	if duelDeath {
+		// A lost duel (m_nVehicleStatus -1): no exp loss, no ultimate
+		// death, and skills above 200 (not level 100) stay.
+		s.deathLoss, s.duelDeathMark = -1, false
+	}
 	s.startRebirthTimer()
 	kept := s.buffs[:0]
 	var removed []uint32
 	for _, b := range s.buffs {
+		if duelDeath && b.SkillID > 200 && b.SkillLevel != 100 {
+			kept = append(kept, b)
+			continue
+		}
 		if d := db.MustDefs().Skill(b.SkillID, b.SkillLevel); d != nil && d.KeepOnDeath {
 			kept = append(kept, b)
 			continue

@@ -69,13 +69,18 @@ type ConnectedPlayer struct {
 	friendly     []pendingFriendly
 	userHits     []pendingUserHit
 	pvpKills     []pvpKill
+	duelEnds     []pendingDuelEnd
+	duelWins     int
 	itemGrants   []db.Item
 	weaponWear   int
 
 	guild    playerGuildState // guarded by guildMu
 	soulKill bool
 
-	alive atomic.Bool
+	alive    atomic.Bool
+	debuffed atomic.Bool // an active debuff (PvPHaveDebuff), refreshed by its session
+
+	duel duelState // guarded by duelMu
 
 	// Party state, guarded by partyMu.
 	party          *party
@@ -179,6 +184,7 @@ func (p *ConnectedPlayer) Unregister() {
 	delete(bucket(p.MapID()), p.CharacterID)
 	registryMu.Unlock()
 	tradeCancelForDisconnect(p.CharacterID, p.log)
+	duelLeave(p, 0, false) // PvPChkLeaveByZoneLeave
 	partyLeaveOnDisconnect(p)
 }
 

@@ -70,7 +70,20 @@ func (p *ConnectedPlayer) TakeUserHits() []pendingUserHit {
 
 // isTeam is CUser::IsTeam without duels (none exist yet): the user
 // itself, anyone on a WarType P map, or the same country.
-func (s *Session) isTeam(p *ConnectedPlayer) bool { return s.teamUsable(p) }
+// isTeam is CUser::IsTeam: the user itself, else not the duel opponent,
+// then a WarType P map or the same country.
+func (s *Session) isTeam(p *ConnectedPlayer) bool {
+	if p == s.player {
+		return true
+	}
+	if s.player != nil && duelFoes(s.player, p) {
+		return false
+	}
+	if z, ok := mapConfig.Zones[realMap(s.char.MapID)]; ok && z.WarType == "P" {
+		return true
+	}
+	return p.Faction() == s.faction
+}
 
 // hostileUser finds an attackable user for a normal attack.
 func (s *Session) hostileUser(id uint32) *ConnectedPlayer {
@@ -358,6 +371,7 @@ func (s *Session) applyUserHit(h pendingUserHit) bool {
 			buildCharacterUserAttack(h.AttackerID, ch.ID, attackResultMiss, 0), "0x0502 user attack (miss)")
 		return false
 	}
+	duelHitBy(s.player, h.AttackerID) // PvPChkLeaveByAttack
 	closeRanged := DistanceXZ(h.X, h.Z, ch.PosX, ch.PosZ) <= closeRangeDistance
 	mirrored := s.reflects(h.Kind, nil)
 	value, crit := userDamage(&h.Stats, &stats, h.Kind, closeRanged)
@@ -417,6 +431,7 @@ func (s *Session) afterUserDamage(killerID uint32, killed bool) {
 		return
 	}
 	s.deathByUser(killerID)
+	defer duelLeave(s.player, 3, true) // PvPChkLeaveByDeath
 	state, death := buildCharacterDeathState(ch.ID), buildCharacterDeath(ch.ID, deathTypeUser, killerID)
 	for _, p := range PlayersNear(ch.MapID, ch.PosX, ch.PosZ, CombatRadius) {
 		p.Send(state, "0x051C character death state")

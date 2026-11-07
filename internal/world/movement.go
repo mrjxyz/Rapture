@@ -73,6 +73,9 @@ func (s *Session) applyTeleport(mapID uint16, x, y, z float32, label string) {
 	}
 	// LeaveUser / EnterUser: the old view goes (on the same map the client
 	// keeps its entities, so they get leave packets), then the new one.
+	if mapID != ch.MapID && s.player != nil {
+		duelLeave(s.player, 0, false) // PvPChkLeaveByZoneLeave
+	}
 	s.clearView(mapID == ch.MapID)
 	ch.MapID, ch.PosX, ch.PosY, ch.PosZ = mapID, x, y, z
 	if s.player != nil {
@@ -106,6 +109,7 @@ func (s *Session) handleCharacterMove(p []byte) {
 		s.player.UpdateCharacter(*ch)
 		s.player.UpdateMotion(motion, direction)
 	}
+	s.duelCheckMove()
 	if portal, ok := s.usablePortal(x, y, z, nil); ok {
 		s.applyTeleport(portal.TargetMapID, portal.TargetX, portal.TargetY, portal.TargetZ, "portal teleport")
 		return

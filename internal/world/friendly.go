@@ -48,10 +48,13 @@ func (p *ConnectedPlayer) TakeFriendly() []pendingFriendly {
 	return f
 }
 
-// teamUsable is IsTeamUsable without duels (none exist yet).
+// teamUsable is IsTeamUsable (guild duels not yet).
 func (s *Session) teamUsable(p *ConnectedPlayer) bool {
 	if p == s.player {
 		return true
+	}
+	if (s.player != nil && inActiveDuel(s.player)) || inActiveDuel(p) {
+		return false // nobody in a fighting duel is team-usable
 	}
 	if z, ok := mapConfig.Zones[realMap(s.char.MapID)]; ok && z.WarType == "P" {
 		return true

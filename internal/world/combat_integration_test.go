@@ -1123,3 +1123,142 @@ func TestUserSkills(t *testing.T) {
 		t.Fatalf("debuff %d not on the enemy (buffs %d)", debuff.SkillID, len(enemy.buffs))
 	}
 }
+
+// TestDuel follows CUser::PacketPVP and PvPChkLoseDeath: two users of the
+// same country agree, wager, count down, fight as foes, and the loser's
+// death pays both wagers to the winner with no exp or kill.
+func TestDuel(t *testing.T) {
+	if _, err := os.Stat("data/game"); err != nil {
+		os.Chdir("../..")
+	}
+	config.LoadRuntimeEnv()
+	if err := db.Open(db.UserData, db.GameData, db.GameDefs); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ReloadDefsForTest(); err != nil {
+		t.Fatal(err)
+	}
+	logger, err := logx.New("rapture_world_test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const mapID = 60053
+	session := func(id uint32, x float32) *Session {
+		a, b := net.Pipe()
+		go io.Copy(io.Discard, b)
+		ch := &db.Character{ID: id, Level: 40, Mode: growNormal, Str: 80, Dex: 50, Rec: 50, Int: 20, Wis: 20, Luc: 50,
+			MapID: mapID, PosX: x, PosY: 11, PosZ: 500, Money: 1000}
+		ch.MaxHP, ch.MaxMP, ch.MaxSP = basePools(ch)
+		ch.CurrentHP, ch.CurrentMP, ch.CurrentSP = ch.MaxHP, ch.MaxMP, ch.MaxSP
+		s := &Session{char: ch, log: logger.Tagged("unit"), logger: logger, faction: FactionLight,
+			skillCooldowns: map[uint16]time.Time{}, out: &connWriter{conn: a}}
+		s.player = RegisterPlayer(*ch, nil, false, FactionLight, s.out, logger)
+		s.player.SetAlive(true)
+		t.Cleanup(s.player.Unregister)
+		return s
+	}
+	a := session(900401, 500)
+	b := session(900402, 506)
+	defer clearMapItems(mapID)
+	state := func(s *Session) int { st, _ := duelStateOf(s.player); return st }
+
+	if a.hostileUser(b.char.ID) != nil {
+		t.Fatal("same-country users are foes before a duel")
+	}
+	a.duelRequest(b.char.ID)
+	if state(a) != duelAsking || state(b) != duelAsked {
+		t.Fatalf("after request: %d / %d", state(a), state(b))
+	}
+	b.duelAnswer(true)
+	if state(a) != duelWindow || state(b) != duelWindow {
+		t.Fatalf("after accept: %d / %d", state(a), state(b))
+	}
+	// A wagers 300 gold; B wagers 200 gold and a weapon.
+	var weapon db.Item
+	for typeID := uint8(1); typeID < 60; typeID++ {
+		if d := db.MustDefs().Item(1, typeID); d != nil && d.AttackTime > 0 {
+			weapon = db.Item{Bag: 1, Slot: 0, Type: 1, TypeID: typeID, Quality: d.Quality, Count: 1}
+			break
+		}
+	}
+	b.items = []db.Item{weapon}
+	a.duelMoney(300)
+	b.duelMoney(200)
+	b.duelAddItem(1, 0, 1, 0)
+	if b.player.duel.picks[0] == nil {
+		t.Fatal("wager item refused")
+	}
+	a.duelReady(0)
+	b.duelReady(0) // B is last: its own inventory moves here, A's through the database
+	if state(a) != duelCountdown || len(b.items) != 0 || b.char.Money != 800 {
+		t.Fatalf("after ready: state %d, B items %d money %d", state(a), len(b.items), b.char.Money)
+	}
+	if r := a.player.TakeTradeRefresh(); r == nil || r.MoneyDelta != -300 {
+		t.Fatalf("A's wager refresh %+v", r)
+	}
+	if a.hostileUser(b.char.ID) != nil {
+		t.Fatal("foes during the countdown")
+	}
+	duelMu.Lock()
+	a.player.duel.deadline = time.Now().Add(-time.Second)
+	duelMu.Unlock()
+	a.tickDuel()
+	if state(a) != duelFighting || state(b) != duelFighting {
+		t.Fatalf("after countdown: %d / %d", state(a), state(b))
+	}
+	if a.hostileUser(b.char.ID) == nil {
+		t.Fatal("duelists are not foes")
+	}
+	if a.teamUsable(b.player) {
+		t.Fatal("a duelist is team-usable")
+	}
+
+	stats := a.stats()
+	for i := 0; i < 400 && !b.dead; i++ {
+		b.player.QueueUserHit(pendingUserHit{AttackerID: a.char.ID, Stats: stats, Kind: attackMelee, X: 500, Z: 500})
+		b.tickUserHits()
+	}
+	if !b.dead {
+		t.Fatal("the duel did not end in a death")
+	}
+	if state(a) != duelNone || state(b) != duelNone {
+		t.Fatalf("after the death: %d / %d", state(a), state(b))
+	}
+	if b.char.Defeats != 1 || b.char.Deaths != 0 || b.deathLoss != -1 {
+		t.Fatalf("loser defeats %d deaths %d loss %d", b.char.Defeats, b.char.Deaths, b.deathLoss)
+	}
+	if exp, _ := a.player.TakeRewards(); len(exp) != 0 {
+		t.Fatalf("duel winner got exp %v", exp)
+	}
+	a.applyDuelWins()
+	kills := a.char.Kills
+	a.tickPvP()
+	if a.char.Victories != 1 || a.char.Kills != kills {
+		t.Fatalf("winner victories %d kills %d", a.char.Victories, a.char.Kills)
+	}
+	gold, items := uint32(0), 0
+	for _, mi := range itemsOnMap(mapID) {
+		if mi.OwnerID != a.char.ID {
+			t.Fatalf("wager owned by %d", mi.OwnerID)
+		}
+		gold += mi.Money
+		if mi.Money == 0 {
+			items++
+		}
+	}
+	if gold != 500 || items != 1 {
+		t.Fatalf("wagers on the ground: gold %d items %d", gold, items)
+	}
+
+	// A request answered by nobody expires after 10 s.
+	b.dead = false
+	b.player.SetAlive(true)
+	a.duelRequest(b.char.ID)
+	duelMu.Lock()
+	a.player.duel.deadline = time.Now().Add(-time.Second)
+	duelMu.Unlock()
+	a.tickDuel()
+	if state(a) != duelNone || state(b) != duelNone {
+		t.Fatalf("request did not expire: %d / %d", state(a), state(b))
+	}
+}

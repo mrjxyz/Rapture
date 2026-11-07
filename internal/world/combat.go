@@ -201,6 +201,7 @@ func (s *Session) applyIncomingMobDamage(d pendingDamage) bool {
 	if s.blocksAttack(attackMelee) || !mobHits(&mc, &stats, attackMelee) {
 		result = attackResultMiss
 	} else {
+		duelHitBy(s.player, 0) // CMob::Attack -> PvPChkLeaveByAttack
 		v, crit := mobDamage(&mc, slot, &stats)
 		damage = uint32(max(v, 0))
 		if stats.Absorption > 0 {
@@ -250,6 +251,7 @@ func (s *Session) applyMobSkill(d pendingDamage, md *db.MobDef, mc *mobCombat, s
 		if s.blocksAttack(int(sk.Kind)) || !mobSkillHits(mc, md, sk, stats) {
 			result = attackResultMiss
 		} else {
+			duelHitBy(s.player, 0)
 			var crit bool
 			damage, crit = mobSkillDamage(mc, md, sk, stats, mob.CurrentHP)
 			if crit {
@@ -359,6 +361,7 @@ func (s *Session) afterMobDamage(d pendingDamage, killed bool) {
 	ClearMobAggro(ch.MapID, d.MobGlobalID)
 	if s.player != nil {
 		s.player.SetAlive(false)
+		duelLeave(s.player, 3, true) // PvPChkLeaveByDeath
 	}
 	s.log.Printf("Rapture World character died character_id=%d killer_mob_global_id=%d mob_id=%d", ch.ID, d.MobGlobalID, d.MobID)
 }
