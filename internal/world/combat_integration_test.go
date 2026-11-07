@@ -1401,3 +1401,82 @@ func TestGodBlessStorage(t *testing.T) {
 type testLog struct{ t *testing.T }
 
 func (l testLog) Printf(format string, args ...any) { l.t.Logf(format, args...) }
+
+// TestGemSkills follows AttackItemOption / BeAttackedItemOption: a landed
+// hit casts the attacker's weapon gem skill on the target and the
+// target's armour gem skill on the attacker, and gem casts cast no gems.
+func TestGemSkills(t *testing.T) {
+	if _, err := os.Stat("data/game"); err != nil {
+		os.Chdir("../..")
+	}
+	config.LoadRuntimeEnv()
+	if err := db.Open(db.UserData, db.GameData, db.GameDefs); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ReloadDefsForTest(); err != nil {
+		t.Fatal(err)
+	}
+	logger, err := logx.New("rapture_world_test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	poison, slow := db.MustDefs().Item(gemItemType, 126), db.MustDefs().Item(gemItemType, 120)
+	if poison == nil || slow == nil || poison.Special != 9 || slow.Special != 6 {
+		t.Skip("gems 30126/30120 missing")
+	}
+	const mapID = 60055
+	session := func(id uint32, faction uint8, x float32) *Session {
+		a, b := net.Pipe()
+		go io.Copy(io.Discard, b)
+		ch := &db.Character{ID: id, Level: 40, Mode: growNormal, Str: 80, Dex: 80, Rec: 50, Int: 20, Wis: 20, Luc: 50,
+			MapID: mapID, PosX: x, PosY: 11, PosZ: 500}
+		ch.MaxHP, ch.MaxMP, ch.MaxSP = basePools(ch)
+		ch.CurrentHP, ch.CurrentMP, ch.CurrentSP = ch.MaxHP, ch.MaxMP, ch.MaxSP
+		s := &Session{char: ch, log: logger.Tagged("unit"), logger: logger, faction: faction,
+			skillCooldowns: map[uint16]time.Time{}, out: &connWriter{conn: a}}
+		s.player = RegisterPlayer(*ch, nil, false, faction, s.out, logger)
+		s.player.SetAlive(true)
+		t.Cleanup(s.player.Unregister)
+		return s
+	}
+	a := session(900601, FactionLight, 500)
+	b := session(900602, FactionDark, 501)
+	a.items = []db.Item{{Bag: 0, Slot: weaponSlot, Type: 1, TypeID: 1, Count: 1, Gems: [6]uint8{126}}}
+	b.items = []db.Item{{Bag: 0, Slot: 6, Type: 1, TypeID: 1, Count: 1, Gems: [6]uint8{120}}}
+	if got := weaponGemSkills(a.items); len(got) != 1 || got[0].SkillID != 9 {
+		t.Fatalf("weapon gem skills %v", got)
+	}
+	if got := armourGemSkills(b.items); len(got) != 1 || got[0].SkillID != 6 {
+		t.Fatalf("armour gem skills %v", got)
+	}
+	stats := a.stats()
+	for i := 0; i < 200 && len(a.player.userHits) == 0; i++ {
+		b.player.QueueUserHit(pendingUserHit{AttackerID: a.char.ID, Stats: stats, Kind: attackMelee, X: 500, Z: 500})
+		b.tickUserHits()
+		b.char.CurrentHP = b.stats().MaxHP
+	}
+	hits := a.player.TakeUserHits()
+	var gemReq, armourCast bool
+	for _, h := range hits {
+		gemReq = gemReq || h.GemAttack
+		armourCast = armourCast || (h.ItemCast && h.Skill != nil && h.Skill.SkillID == 6)
+	}
+	if !gemReq || !armourCast {
+		t.Fatalf("after a landed hit: gem request %v armour cast %v (%d queued)", gemReq, armourCast, len(hits))
+	}
+	a.applyGemAttack(b.char.ID)
+	casts := b.player.TakeUserHits()
+	if len(casts) != 1 || !casts[0].ItemCast || casts[0].Skill.SkillID != 9 {
+		t.Fatalf("weapon gem cast %+v", casts)
+	}
+	// A gem cast that lands casts no gems back.
+	for i := 0; i < 50; i++ {
+		b.player.QueueUserHit(casts[0])
+		b.tickUserHits()
+	}
+	for _, h := range a.player.TakeUserHits() {
+		if h.GemAttack || h.ItemCast {
+			t.Fatal("a gem cast triggered gems")
+		}
+	}
+}

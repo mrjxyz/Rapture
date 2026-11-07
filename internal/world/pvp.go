@@ -52,6 +52,8 @@ type pendingUserHit struct {
 	Caster     [3]uint32    // the caster's HP/SP/MP (DamageType 3)
 	DrainHeal  bool         // a drain's heal coming back to its caster
 	Heal       [3]uint32
+	ItemCast   bool // cast by a gem (m_bItemAttack): casts no gems itself
+	GemAttack  bool // run AttackItemOption on AttackerID (the target hit)
 }
 
 func (p *ConnectedPlayer) QueueUserHit(h pendingUserHit) {
@@ -349,6 +351,10 @@ func (s *Session) applyUserHit(h pendingUserHit) bool {
 		s.applyDrainHeal(h)
 		return false
 	}
+	if h.GemAttack {
+		s.applyGemAttack(h.AttackerID)
+		return false
+	}
 	if h.Skill != nil {
 		return s.applyUserSkillHit(h, stats)
 	}
@@ -400,6 +406,9 @@ func (s *Session) applyUserHit(h pendingUserHit) bool {
 	s.log.Printf("Rapture World user attack attacker_id=%d target_id=%d kind=%d damage=%d crit=%t mirrored=%t killed=%t",
 		h.AttackerID, ch.ID, h.Kind, damage, crit, mirrored, killed)
 	s.afterUserDamage(h.AttackerID, killed)
+	if !killed {
+		s.itemOptionsAfterUserHit(h)
+	}
 	return killed
 }
 

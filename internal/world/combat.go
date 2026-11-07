@@ -146,7 +146,11 @@ func (s *Session) autoAttackSwing(target uint32) bool {
 		result.Mob.ID, result.Mob.MobID, kind, result.DamageHP, crit, result.Mob.CurrentHP, result.Mob.MaxHP, result.Killed)
 	sendNear(ch.MapID, result.Mob.PosX, result.Mob.PosZ, CombatRadius,
 		buildCharacterMobAttack(ch.ID, result.Mob.ID, code, result.DamageHP), "0x0503 character mob auto attack")
-	return s.resolveMobDamage(&result)
+	alive := s.resolveMobDamage(&result)
+	if alive {
+		s.gemCastsOnMob(result.Mob.ID, weaponGemSkills(s.items)) // AttackItemOption(CMob)
+	}
+	return alive
 }
 
 // resolveMobDamage handles the aftermath of any damage to a mob: death,
@@ -226,6 +230,9 @@ func (s *Session) applyIncomingMobDamage(d pendingDamage) bool {
 	if reflected {
 		s.reflectToMob(d.MobGlobalID, [3]uint16{uint16(min(damage, 65535)), 0, 0})
 	}
+	if result != attackResultMiss && !killed {
+		s.gemCastsOnMob(d.MobGlobalID, armourGemSkills(s.items)) // BeAttackedItemOption(CMob)
+	}
 	s.log.Printf("Rapture World mob attack mob_global_id=%d mob_id=%d slot=%d result=%d damage=%d killed=%t",
 		d.MobGlobalID, d.MobID, d.Slot, result, damage, killed)
 	s.afterMobDamage(d, killed)
@@ -292,6 +299,9 @@ func (s *Session) applyMobSkill(d pendingDamage, md *db.MobDef, mc *mobCombat, s
 		// CMob::AttackUser(skill): a debuff stays on the player.
 		if !killed && result != attackResultMiss && sk.TypeEffect == typeEffectDebuff {
 			s.applyMobDebuff(sk, d.MobGlobalID)
+		}
+		if !killed && result != attackResultMiss {
+			s.gemCastsOnMob(d.MobGlobalID, armourGemSkills(s.items)) // BeAttackedItemOption(CMob)
 		}
 		refreshed := s.stats()
 		stats = &refreshed

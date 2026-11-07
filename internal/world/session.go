@@ -65,6 +65,7 @@ type Session struct {
 	autoAttackUser   bool          // the target is a user (0x0502), else a mob
 	damageLedger     []damageEntry // CDamage: HP damage taken per attacker since the last death
 	duelDeathMark    bool          // the last death was a lost duel (m_nVehicleStatus -1)
+	itemAttacking    bool          // m_bItemAttack: casting gem skills
 	lastAutoAttackAt time.Time
 
 	positionDirty    bool

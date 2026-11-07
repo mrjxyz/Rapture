@@ -248,6 +248,9 @@ func (s *Session) skillHit(target uint32, def *db.SkillDef, k db.CharacterSkill,
 			sendNear(ch.MapID, r.Mob.PosX, r.Mob.PosZ, BroadcastRadius, speed, "0x0609 mob speed")
 		}
 	}
+	if alive {
+		s.gemCastsOnMob(target, weaponGemSkills(s.items)) // AttackItemOption(CMob); a gem cast skips it
+	}
 	return alive
 }
 

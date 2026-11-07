@@ -240,6 +240,9 @@ func (s *Session) applyUserSkillHit(h pendingUserHit, stats CharacterStats) bool
 	s.log.Printf("Rapture World pvp skill hit attacker_id=%d target_id=%d skill_id=%d damage=%v crit=%t mirrored=%t killed=%t",
 		h.AttackerID, ch.ID, sk.SkillID, dealt, crit, mirrored, killed)
 	s.afterUserDamage(h.AttackerID, killed)
+	if !killed {
+		s.itemOptionsAfterUserHit(h)
+	}
 	return killed
 }
 
