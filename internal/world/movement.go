@@ -75,6 +75,7 @@ func (s *Session) applyTeleport(mapID uint16, x, y, z float32, label string) {
 	// keeps its entities, so they get leave packets), then the new one.
 	if mapID != ch.MapID && s.player != nil {
 		duelLeave(s.player, 0, false) // PvPChkLeaveByZoneLeave
+		guildDuelLeave(s.player, nil, 1)
 	}
 	s.clearView(mapID == ch.MapID)
 	ch.MapID, ch.PosX, ch.PosY, ch.PosZ = mapID, x, y, z

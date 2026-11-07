@@ -216,8 +216,8 @@ func (s *Session) deathByUser(reported uint32) {
 	if killer == nil {
 		return
 	}
-	if s.duelDeath(killer) {
-		return // PvPGetDeathType 4: PvPChkLoseDeath, no rewards
+	if s.duelDeath(killer) || s.guildDuelDeath(killer) {
+		return // PvPGetDeathType 4/5: PvPChkLoseDeath, no rewards
 	}
 	partyMu.Lock()
 	pt := partyOf(killer)

@@ -150,6 +150,7 @@ func (s *Session) sacrifice() {
 	if s.player != nil {
 		s.player.SetAlive(false)
 		duelLeave(s.player, 3, true) // PvPChkLeaveByDeath
+		guildDuelLeave(s.player, nil, 3)
 	}
 	s.dead, s.autoAttack, s.cast = true, false, nil
 	s.clearBuffsOnDeath()

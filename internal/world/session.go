@@ -252,6 +252,7 @@ func (s *Session) tick(idle bool) {
 	s.tickUserHits()
 	s.tickPvP()
 	s.tickDuel()
+	s.tickGuildDuel()
 	s.applyDuelWins()
 	if s.player != nil {
 		for n := s.player.TakeWeaponWear(); n > 0; n-- {
@@ -595,6 +596,8 @@ func (s *Session) dispatch(op packet.Opcode, p []byte) {
 		s.autoAttack = false
 	case 0x2401, 0x2402, 0x2406, 0x2409, 0x240A, 0x240B, 0x240C:
 		s.handleDuel(op, p)
+	case 0x2501, 0x2502:
+		s.handleGuildDuel(op, p)
 	case packet.ResurrectRequest:
 		s.handleResurrect(p)
 	case packet.ItemRepair:

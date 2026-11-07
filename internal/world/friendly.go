@@ -56,6 +56,9 @@ func (s *Session) teamUsable(p *ConnectedPlayer) bool {
 	if (s.player != nil && inActiveDuel(s.player)) || inActiveDuel(p) {
 		return false // nobody in a fighting duel is team-usable
 	}
+	if s.player != nil && !guildDuelSide(s.player, p) {
+		return false // a guild duel's sides only help themselves
+	}
 	if z, ok := mapConfig.Zones[realMap(s.char.MapID)]; ok && z.WarType == "P" {
 		return true
 	}

@@ -185,6 +185,7 @@ func (p *ConnectedPlayer) Unregister() {
 	registryMu.Unlock()
 	tradeCancelForDisconnect(p.CharacterID, p.log)
 	duelLeave(p, 0, false) // PvPChkLeaveByZoneLeave
+	guildDuelLeave(p, nil, 1)
 	partyLeaveOnDisconnect(p)
 }
 

@@ -1262,3 +1262,115 @@ func TestDuel(t *testing.T) {
 		t.Fatalf("request did not expire: %d / %d", state(a), state(b))
 	}
 }
+
+// TestGuildDuel follows CUser::PacketPVPGuild and CGuild::PvPUserSet /
+// PvPUserLeave: rank 1-4 leaders agree, members near the center enroll,
+// the two sides are foes, and a guild left without participants loses.
+func TestGuildDuel(t *testing.T) {
+	if _, err := os.Stat("data/game"); err != nil {
+		os.Chdir("../..")
+	}
+	config.LoadRuntimeEnv()
+	if err := db.Open(db.UserData, db.GameData, db.GameDefs); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ReloadDefsForTest(); err != nil {
+		t.Fatal(err)
+	}
+	logger, err := logx.New("rapture_world_test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const mapID = 60054
+	session := func(id uint32, x float32) *Session {
+		a, b := net.Pipe()
+		go io.Copy(io.Discard, b)
+		ch := &db.Character{ID: id, Level: 40, Mode: growNormal, Str: 80, Dex: 50, Rec: 50, Int: 20, Wis: 20, Luc: 50,
+			MapID: mapID, PosX: x, PosY: 11, PosZ: 500}
+		ch.MaxHP, ch.MaxMP, ch.MaxSP = basePools(ch)
+		ch.CurrentHP, ch.CurrentMP, ch.CurrentSP = ch.MaxHP, ch.MaxMP, ch.MaxSP
+		s := &Session{char: ch, log: logger.Tagged("unit"), logger: logger, faction: FactionLight,
+			skillCooldowns: map[uint16]time.Time{}, out: &connWriter{conn: a}}
+		s.player = RegisterPlayer(*ch, nil, false, FactionLight, s.out, logger)
+		s.player.SetAlive(true)
+		t.Cleanup(s.player.Unregister)
+		return s
+	}
+	a := session(900501, 500)
+	a2 := session(900502, 504)
+	far := session(900503, 600)
+	b := session(900504, 506)
+	g1 := &guild{ID: 990601, Name: "DuelA", members: map[uint32]*guildMember{}}
+	g2 := &guild{ID: 990602, Name: "DuelB", members: map[uint32]*guildMember{}}
+	guildMu.Lock()
+	for _, x := range []struct {
+		g    *guild
+		s    *Session
+		rank uint8
+	}{{g1, a, 1}, {g1, a2, 9}, {g1, far, 9}, {g2, b, 1}} {
+		x.g.members[x.s.char.ID] = &guildMember{CharID: x.s.char.ID, Rank: x.rank, player: x.s.player}
+		guildOfChar[x.s.char.ID] = x.g
+		x.s.player.guild.guild = x.g
+	}
+	guildsByID[g1.ID], guildsByID[g2.ID] = g1, g2
+	guildMu.Unlock()
+	defer func() {
+		guildMu.Lock()
+		delete(guildsByID, g1.ID)
+		delete(guildsByID, g2.ID)
+		for _, s := range []*Session{a, a2, far, b} {
+			delete(guildOfChar, s.char.ID)
+		}
+		guildMu.Unlock()
+	}()
+	gstate := func(g *guild) int { duelMu.Lock(); defer duelMu.Unlock(); return g.gd.state }
+
+	a2.guildDuelRequest(b.char.ID) // rank 9 cannot ask
+	if gstate(g1) != gduelNone {
+		t.Fatal("a rank 9 member started a guild duel")
+	}
+	a.guildDuelRequest(b.char.ID)
+	if gstate(g1) != gduelAsking || gstate(g2) != gduelAsked {
+		t.Fatalf("after request: %d / %d", gstate(g1), gstate(g2))
+	}
+	b.guildDuelAnswer(true)
+	if gstate(g1) != gduelCountdown || gstate(g2) != gduelCountdown {
+		t.Fatalf("after accept: %d / %d", gstate(g1), gstate(g2))
+	}
+	duelMu.Lock()
+	enrolled := []bool{a.player.duel.gActive, a2.player.duel.gActive, far.player.duel.gActive, b.player.duel.gActive}
+	count1, count2 := g1.gd.count, g2.gd.count
+	g1.gd.deadline = time.Now().Add(-time.Second)
+	duelMu.Unlock()
+	if !enrolled[0] || !enrolled[1] || enrolled[2] || !enrolled[3] || count1 != 2 || count2 != 1 {
+		t.Fatalf("enrolled %v counts %d/%d", enrolled, count1, count2)
+	}
+	a.tickGuildDuel()
+	if gstate(g1) != gduelFighting || gstate(g2) != gduelFighting {
+		t.Fatalf("after countdown: %d / %d", gstate(g1), gstate(g2))
+	}
+	if a.hostileUser(b.char.ID) == nil || a2.hostileUser(b.char.ID) == nil || a.hostileUser(a2.char.ID) != nil || far.hostileUser(b.char.ID) != nil {
+		t.Fatal("guild duel sides wrong")
+	}
+	if a.teamUsable(b.player) || !a.teamUsable(a2.player) || a.teamUsable(far.player) {
+		t.Fatal("guild duel team-usable wrong")
+	}
+
+	stats := a.stats()
+	for i := 0; i < 400 && !b.dead; i++ {
+		b.player.QueueUserHit(pendingUserHit{AttackerID: a.char.ID, Stats: stats, Kind: attackMelee, X: 500, Z: 500})
+		b.tickUserHits()
+	}
+	if !b.dead {
+		t.Fatal("no death in the guild duel")
+	}
+	if gstate(g1) != gduelNone || gstate(g2) != gduelNone {
+		t.Fatalf("guild duel not over: %d / %d", gstate(g1), gstate(g2))
+	}
+	if exp, _ := a.player.TakeRewards(); len(exp) != 0 || b.deathLoss != -1 || b.char.Deaths != 0 {
+		t.Fatalf("guild duel death rewarded: exp %v loss %d deaths %d", exp, b.deathLoss, b.char.Deaths)
+	}
+	if a.hostileUser(b.char.ID) != nil {
+		t.Fatal("still foes after the guild duel")
+	}
+}

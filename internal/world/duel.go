@@ -77,6 +77,12 @@ type duelState struct {
 	ready     bool
 	held      []db.Item
 	heldMoney uint32
+	// Guild duel (CUser +0x54e4 opposing guild, +0x54e8 center, +0x54f8
+	// enrolled, +0x54fc active).
+	gOpp    uint32
+	gCenter [2]float32
+	gJoined bool
+	gActive bool
 }
 
 var duelMu sync.Mutex
@@ -590,6 +596,7 @@ func (s *Session) duelCheckMove() {
 	if me == nil {
 		return
 	}
+	s.guildDuelCheckMove()
 	duelMu.Lock()
 	d := me.duel
 	duelMu.Unlock()
@@ -675,6 +682,5 @@ func (s *Session) applyDuelWins() {
 	s.persist()
 }
 
-// guildDuelState is the guild duel state (0 without one; guild duels are
-// in guildduel.go).
-func (p *ConnectedPlayer) guildDuelState() int { return 0 }
+// guildDuelState is CUser +0x54e4 (non-zero in a guild duel), under duelMu.
+func (p *ConnectedPlayer) guildDuelState() uint32 { return p.duel.gOpp }

@@ -66,6 +66,7 @@ type guild struct {
 	// Guild ranking battle, reset by each ranking (CGuild +0x98, +0x9c,
 	// +0xa0).
 	grbPoints, duelBonus, grbEntries uint32
+	gd                               guildDuel // guarded by duelMu
 	members                          map[uint32]*guildMember
 	applicants                       map[uint32]*guildMember
 	bank                             [guildBankSlots]*db.Item
@@ -991,6 +992,8 @@ func (s *Session) guildAnswerApplicant(accept bool, charID uint32) {
 // and an emptied guild is disbanded.
 func (s *Session) guildLeave() {
 	me := s.player
+	var left *guild
+	defer func() { guildDuelLeave(me, left, 1) }() // PvPChkLeaveByGuildLeave, after guildMu
 	guildMu.Lock()
 	defer guildMu.Unlock()
 	g := me.guild.guild
@@ -1005,6 +1008,7 @@ func (s *Session) guildLeave() {
 	delete(g.members, s.char.ID)
 	delete(guildOfChar, s.char.ID)
 	me.guild.guild = nil
+	left = g
 	_ = db.DeleteGuildChar(g.ID, s.char.ID)
 	s.send(guildResult(packet.GuildLeave, 1), "0x0D09 guild left")
 	g.send(guildStatus(guildStatusLeft, s.char.ID), "0x0D0C guild member left", nil)
@@ -1015,6 +1019,13 @@ func (s *Session) guildLeave() {
 
 // guildExpel (0x0D0A): CGuild::JoinExpel, only lower ranks.
 func (s *Session) guildExpel(charID uint32) {
+	var expelled *ConnectedPlayer
+	var from *guild
+	defer func() {
+		if expelled != nil {
+			guildDuelLeave(expelled, from, 1)
+		}
+	}()
 	guildMu.Lock()
 	defer guildMu.Unlock()
 	g := s.player.guild.guild
@@ -1036,6 +1047,7 @@ func (s *Session) guildExpel(charID uint32) {
 	if t.player != nil {
 		t.player.Send(guildResultID(packet.GuildExpel, 1, charID), "0x0D0A guild expelled")
 		t.player.guild.guild = nil
+		expelled, from = t.player, g
 	}
 	s.send(guildResultID(packet.GuildExpel, 1, charID), "0x0D0A guild expel done")
 	g.send(guildStatus(guildStatusExpel, charID), "0x0D0C guild member expelled", nil)

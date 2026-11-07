@@ -362,6 +362,7 @@ func (s *Session) afterMobDamage(d pendingDamage, killed bool) {
 	if s.player != nil {
 		s.player.SetAlive(false)
 		duelLeave(s.player, 3, true) // PvPChkLeaveByDeath
+		guildDuelLeave(s.player, nil, 3)
 	}
 	s.log.Printf("Rapture World character died character_id=%d killer_mob_global_id=%d mob_id=%d", ch.ID, d.MobGlobalID, d.MobID)
 }

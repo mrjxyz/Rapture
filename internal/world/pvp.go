@@ -76,7 +76,7 @@ func (s *Session) isTeam(p *ConnectedPlayer) bool {
 	if p == s.player {
 		return true
 	}
-	if s.player != nil && duelFoes(s.player, p) {
+	if s.player != nil && (duelFoes(s.player, p) || guildDuelFoes(s.player, p)) {
 		return false
 	}
 	if z, ok := mapConfig.Zones[realMap(s.char.MapID)]; ok && z.WarType == "P" {
@@ -431,7 +431,8 @@ func (s *Session) afterUserDamage(killerID uint32, killed bool) {
 		return
 	}
 	s.deathByUser(killerID)
-	defer duelLeave(s.player, 3, true) // PvPChkLeaveByDeath
+	defer duelLeave(s.player, 3, true)     // PvPChkLeaveByDeath
+	defer guildDuelLeave(s.player, nil, 3) // its guild part
 	state, death := buildCharacterDeathState(ch.ID), buildCharacterDeath(ch.ID, deathTypeUser, killerID)
 	for _, p := range PlayersNear(ch.MapID, ch.PosX, ch.PosZ, CombatRadius) {
 		p.Send(state, "0x051C character death state")
