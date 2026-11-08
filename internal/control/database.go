@@ -20,10 +20,27 @@ const Container = "rapture-sqlserver"
 
 const databaseTimeout = 120 * time.Second
 
+// dockerBin finds the docker CLI. The desktop launcher runs with the session
+// PATH, which does not include ~/.local/bin where the rootless CLI lives.
+func dockerBin() string {
+	if path, err := exec.LookPath("docker"); err == nil {
+		return path
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		for _, dir := range []string{".local/bin", "bin"} {
+			path := filepath.Join(home, dir, "docker")
+			if info, err := os.Stat(path); err == nil && !info.IsDir() {
+				return path
+			}
+		}
+	}
+	return "docker"
+}
+
 func containerRunning() (bool, error) {
-	out, err := exec.Command("docker", "inspect", "-f", "{{.State.Running}}", Container).Output()
+	out, err := exec.Command(dockerBin(), "inspect", "-f", "{{.State.Running}}", Container).CombinedOutput()
 	if err != nil {
-		return false, fmt.Errorf("container %s not found -- run tools/sqlserver.py setup", Container)
+		return false, fmt.Errorf("docker inspect %s: %v: %s", Container, err, strings.TrimSpace(string(out)))
 	}
 	return strings.TrimSpace(string(out)) == "true", nil
 }
@@ -42,7 +59,7 @@ func EnsureDatabase() error {
 		return err
 	}
 	if !running {
-		if out, err := exec.Command("docker", "start", Container).CombinedOutput(); err != nil {
+		if out, err := exec.Command(dockerBin(), "start", Container).CombinedOutput(); err != nil {
 			return fmt.Errorf("docker start %s: %v: %s", Container, err, strings.TrimSpace(string(out)))
 		}
 	}
@@ -74,7 +91,7 @@ func EnsureDatabase() error {
 // StopDatabase stops the SQL Server container to free its memory.
 func StopDatabase() {
 	if DatabaseRunning() {
-		exec.Command("docker", "stop", Container).Run()
+		exec.Command(dockerBin(), "stop", "--time", "60", Container).Run()
 	}
 }
 
