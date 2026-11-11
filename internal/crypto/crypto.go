@@ -63,12 +63,17 @@ func leBytes(v *big.Int) []byte {
 	return out
 }
 
-// DecryptLoginRSA decrypts the client's little-endian RSA block.
+// DecryptLoginRSA decrypts the client's little-endian RSA block. The
+// client's secret is always 128 bytes (0x401160 only clears the top bit of
+// the last byte), so the result keeps the modulus width: dropping high zero
+// bytes would change the HMAC key and fail about 1 login in 128.
 func DecryptLoginRSA(encrypted []byte) []byte {
 	c := leInt(encrypted)
 	d := new(big.Int).SetBytes(privateExponentBE[:])
 	n := new(big.Int).SetBytes(modulusBE[:])
-	return leBytes(new(big.Int).Exp(c, d, n))
+	out := make([]byte, len(modulusBE))
+	copy(out, leBytes(new(big.Int).Exp(c, d, n)))
+	return out
 }
 
 // DeriveLoginAESMaterial is HMAC-SHA256(key=decrypted, msg=modulus LE):

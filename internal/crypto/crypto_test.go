@@ -2,6 +2,7 @@ package crypto
 
 import (
 	"encoding/hex"
+	"math/big"
 	"testing"
 )
 
@@ -52,5 +53,20 @@ func check(t *testing.T, name string, got []byte, want string) {
 	t.Helper()
 	if hex.EncodeToString(got) != want {
 		t.Fatalf("%s mismatch:\n got %x\nwant %s", name, got, want)
+	}
+}
+
+// A secret whose most significant byte is zero must keep its 128-byte
+// width, or the HMAC key differs from the client's.
+func TestDecryptKeepsHighZeroBytes(t *testing.T) {
+	secret := make([]byte, 128)
+	for i := range secret[:126] {
+		secret[i] = byte(i + 1)
+	}
+	e, n := leInt(exponent[:]), leInt(reversed(modulusBE[:]))
+	encrypted := leBytes(new(big.Int).Exp(leInt(secret), e, n))
+	got := DecryptLoginRSA(encrypted)
+	if len(got) != 128 || hex.EncodeToString(got) != hex.EncodeToString(secret) {
+		t.Fatalf("decrypted %d bytes, want the 128-byte secret back", len(got))
 	}
 }
